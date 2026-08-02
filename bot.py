@@ -21,8 +21,10 @@ if cred_json:
     with open("credenciales.json", "w") as f:
         json.dump(creds_dict, f)
     CREDENTIALS_FILE = "credenciales.json"
+    print("✅ Credenciales cargadas desde variable CREDENTIALS_JSON")
 else:
     CREDENTIALS_FILE = os.path.join(BASE_DIR, "credenciales.json")
+    print("⚠️ Usando archivo credenciales.json local")
 # ========================================================
 
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
