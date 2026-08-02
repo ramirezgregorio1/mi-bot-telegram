@@ -1,0 +1,6 @@
+python-telegram-bot==20.8
+pytesseract
+Pillow
+gspread
+oauth2client
+python-dotenv
