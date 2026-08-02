@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes, CommandHandler
@@ -12,7 +13,18 @@ TELEGRAM_TOKEN = "8224897386:AAGyv-f_GqAoyfQGy9Lu-sA3NCSSA8K2LmM"
 GOOGLE_SHEET_ID = "1HK27kQ5TvAH4p0Zt6OgNkiUlR6V0JsVxcljw2arV2nI"
 SHEET_NAME = "Registro"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CREDENTIALS_FILE = os.path.join(BASE_DIR, "credenciales.json")
+
+# ===== LEE CREDENCIALES DESDE VARIABLE DE RAILWAY =====
+cred_json = os.getenv("CREDENTIALS_JSON")
+if cred_json:
+    creds_dict = json.loads(cred_json)
+    with open("credenciales.json", "w") as f:
+        json.dump(creds_dict, f)
+    CREDENTIALS_FILE = "credenciales.json"
+else:
+    CREDENTIALS_FILE = os.path.join(BASE_DIR, "credenciales.json")
+# ========================================================
+
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 if TESSERACT_PATH and TESSERACT_PATH.strip():
