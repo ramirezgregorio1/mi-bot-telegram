@@ -78,7 +78,7 @@ def conectar_google_sheets(nombre_hoja=SHEET_NAME):
         if nombre_hoja == SHEET_NAME:
             worksheet.append_row(["Timestamp", "Fecha", "Comercio", "Categoria", "Monto", "Forma Pago", "Tipo"])
         elif nombre_hoja == FINANZAS_SHEET:
-            worksheet.append_row(["Fecha", "Concepto", "Categoria", "Monto", "Saldo", "Medio", "Nota"])
+            worksheet.append_row(["Fecha", "Concepto", "Categoria", "Monto", "Medio", "Nota"])
     return worksheet
 
 def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago, tipo="gasto"):
@@ -100,17 +100,9 @@ def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago,
 
 def guardar_movimiento_finanzas(worksheet, concepto, categoria, monto, medio="", nota=""):
     try:
-        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         fecha = datetime.now().strftime("%d/%m/%Y")
-        # Obtener el saldo actual sumando todos los movimientos anteriores de esta categoría y medio
-        registros = worksheet.get_all_records()
-        saldo_actual = 0
-        for r in registros:
-            if r.get('Categoria') == categoria and r.get('Medio') == medio:
-                saldo_actual += float(r.get('Monto', 0))
-        # El nuevo saldo es el saldo actual + el monto del movimiento
-        nuevo_saldo = saldo_actual + monto
-        fila = [fecha, concepto, categoria, monto, nuevo_saldo, medio, nota]
+        # Guardar solo el movimiento, sin calcular saldo
+        fila = [fecha, concepto, categoria, monto, medio, nota]
         worksheet.append_row(fila, value_input_option='USER_ENTERED')
         return True
     except Exception as e:
