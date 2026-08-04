@@ -101,7 +101,8 @@ def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago,
 def guardar_movimiento_finanzas(worksheet, concepto, categoria, monto, medio="", nota=""):
     try:
         fecha = datetime.now().strftime("%d/%m/%Y")
-        fila = [fecha, concepto, categoria, monto, medio, nota]
+        monto_float = float(monto)
+        fila = [fecha, concepto, categoria, monto_float, medio, nota]
         worksheet.append_row(fila, value_input_option='USER_ENTERED')
         return True
     except Exception as e:
@@ -111,7 +112,7 @@ def guardar_movimiento_finanzas(worksheet, concepto, categoria, monto, medio="",
 def obtener_saldo_medio(worksheet, categoria, medio):
     try:
         registros = worksheet.get_all_records()
-        saldo = 0
+        saldo = 0.0
         for r in registros:
             cat = r.get('Categoria', '').strip().lower()
             med = r.get('Medio', '').strip().lower()
@@ -123,12 +124,12 @@ def obtener_saldo_medio(worksheet, categoria, medio):
         return saldo
     except Exception as e:
         print(f"Error en obtener_saldo_medio: {e}")
-        return 0
+        return 0.0
 
 def obtener_saldo_total(worksheet, categoria):
     try:
         registros = worksheet.get_all_records()
-        saldo = 0
+        saldo = 0.0
         for r in registros:
             if r.get('Categoria', '').strip().lower() == categoria:
                 try:
@@ -138,7 +139,7 @@ def obtener_saldo_total(worksheet, categoria):
         return saldo
     except Exception as e:
         print(f"Error en obtener_saldo_total: {e}")
-        return 0
+        return 0.0
 
 # ==================== EXTRACCION DE DATOS DE FACTURA ====================
 def extraer_datos_factura(imagen_path):
@@ -311,9 +312,9 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         worksheet = conectar_google_sheets(FINANZAS_SHEET)
         registros = worksheet.get_all_records()
         
-        efectivo = 0
-        debito = 0
-        credito = 0
+        efectivo = 0.0
+        debito = 0.0
+        credito = 0.0
         
         for r in registros:
             categoria = r.get('Categoria', '').strip().lower()
@@ -321,7 +322,7 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 monto = float(r.get('Monto', 0))
             except:
-                monto = 0
+                monto = 0.0
             
             if categoria == 'capital':
                 if medio == 'efectivo':
@@ -337,14 +338,14 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         registros_gastos = worksheet_gastos.get_all_records()
         total_gastos = sum(float(r.get('Monto', 0)) for r in registros_gastos if r.get('Tipo', 'gasto') == 'gasto')
         
-        emergencia = 0
-        inversion = 0
+        emergencia = 0.0
+        inversion = 0.0
         for r in registros:
             categoria = r.get('Categoria', '').strip().lower()
             try:
                 monto = float(r.get('Monto', 0))
             except:
-                monto = 0
+                monto = 0.0
             if categoria == 'emergencia':
                 emergencia += monto
             elif categoria == 'inversion':
