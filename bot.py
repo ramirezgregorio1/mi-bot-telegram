@@ -67,6 +67,7 @@ datos_usuario = {}
 
 # ==================== COINCIDENCIA APROXIMADA ====================
 def levenshtein(a, b):
+    """Calcula la distancia de Levenshtein entre dos palabras"""
     if len(a) < len(b):
         a, b = b, a
     if len(b) == 0:
@@ -84,6 +85,7 @@ def levenshtein(a, b):
     return row1[-1]
 
 def similar(palabra1, palabra2, umbral=1):
+    """Verifica si dos palabras son similares permitiendo errores de escritura"""
     if len(palabra1) < 3 or len(palabra2) < 3:
         return palabra1 == palabra2
     if abs(len(palabra1) - len(palabra2)) > umbral:
@@ -96,6 +98,7 @@ def similar(palabra1, palabra2, umbral=1):
     return levenshtein(palabra1, palabra2) <= umbral
 
 def contiene_palabra(texto, lista_palabras, umbral=1):
+    """Verifica si el texto contiene alguna palabra de la lista, permitiendo errores"""
     texto_limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ ]', '', texto.lower())
     palabras_texto = texto_limpio.split()
     for palabra_buscar in lista_palabras:
@@ -603,12 +606,12 @@ def extraer_monto(texto):
     """Extrae el monto de cualquier texto, con soporte para comas y decimales"""
     texto_limpio = re.sub(r'\bcentavos?\b', '', texto, flags=re.IGNORECASE)
     patrones = [
-        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)',  # 22,853.86
-        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:,\d{1,2})?)',  # 22,853,86
-        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:,\d{1,2})?)',  # 22.853,86
-        r'\$?\s*(\d{1,}(?:\.\d{1,2})?)',             # 22853.86
-        r'\$?\s*(\d{1,}(?:,\d{1,2})?)',             # 22853,86
-        r'(\d+)\s*(?:pesos|peso)',                  # 350 pesos
+        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)',
+        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:,\d{1,2})?)',
+        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:,\d{1,2})?)',
+        r'\$?\s*(\d{1,}(?:\.\d{1,2})?)',
+        r'\$?\s*(\d{1,}(?:,\d{1,2})?)',
+        r'(\d+)\s*(?:pesos|peso)',
     ]
     for patron in patrones:
         match = re.search(patron, texto_limpio)
@@ -627,6 +630,7 @@ def extraer_monto(texto):
     return None
 
 def extraer_concepto(texto, monto):
+    """Extrae el concepto eliminando el monto y palabras comunes"""
     texto_sin_monto = re.sub(r'\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)', '', texto)
     palabras_ruido = ['gasté', 'pagué', 'compré', 'usé', 'gasto', 'pago', 'en', 'de', 'por', 'para', 'con', 'sin', 'eh', 'mmm', 'creo', 'como', 'pues', 'ahorita', 'oye', 'mira', 'bueno', 'entonces', 'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas']
     for palabra in palabras_ruido:
@@ -636,6 +640,7 @@ def extraer_concepto(texto, monto):
 
 # ==================== PROCESADOR DE LENGUAJE NATURAL ====================
 async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa mensajes de texto con coincidencia aproximada y análisis de contexto"""
     texto_original = update.message.text
     texto = texto_original.lower().strip()
     user_id = update.effective_user.id
@@ -644,33 +649,35 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         await start(update, context)
         return
     
+    # Extraer monto
     monto = extraer_monto(texto)
     
-    palabras_capital = ['tengo', 'ten', 'teng', 'tenho', 'capital', 'capial', 'ahorro', 'ahoro', 'cuenta', 'cueta', 'saldo', 'fondo']
+    # ========== DETECTAR INTENCIÓN ==========
+    # Palabras clave para cada categoría (con errores comunes)
+    palabras_capital = ['tengo', 'ten', 'teng', 'tenho', 'capital', 'capial', 'ahorro', 'ahoro', 'cuenta', 'cueta', 'saldo', 'fondo', 'total', 'banco', 'mi dinero']
     palabras_gasto = ['gaste', 'gasté', 'gast', 'pag', 'pague', 'pagué', 'compre', 'compré', 'compr', 'use', 'usé', 'gasto', 'pago', 'costo', 'costó', 'costaron', 'comida', 'super', 'mercado', 'cheetos']
-    palabras_ingreso = ['agrege', 'agregé', 'agreg', 'ingrese', 'ingresé', 'ingres', 'sume', 'sumé', 'aumente', 'aumenté', 'recibe', 'recibí', 'deposite', 'deposité', 'sueldo', 'salario', 'bono']
+    palabras_ingreso = ['agrege', 'agregé', 'agreg', 'ingrese', 'ingresé', 'ingres', 'sume', 'sumé', 'aumente', 'aumenté', 'recibe', 'recibí', 'deposite', 'deposité', 'sueldo', 'salario', 'bono', 'pago', 'me pagaron']
     palabras_retiro = ['retire', 'retiré', 'retir', 'saque', 'saqué', 'quite', 'quité', 'sacar', 'retiro']
-    palabras_balance = ['cuanto tengo', 'cuánto tengo', 'balance', 'cuanto dinero', 'cuánto dinero', 'resumen', 'saldo actual', 'estatus']
+    palabras_balance = ['cuanto tengo', 'cuánto tengo', 'balance', 'cuanto dinero', 'cuánto dinero', 'resumen', 'saldo actual', 'estatus', 'mis finanzas']
     palabras_emergencia = ['emergencia', 'emerncia', 'fondo', 'ahorro', 'reserva']
     palabras_inversion = ['inversion', 'inversión', 'invierto', 'inverti', 'invertí', 'accion', 'bolsa', 'cripto', 'bitcoin']
     palabras_deuda = ['deuda', 'debo', 'adeudo', 'credito', 'crédito', 'tarjeta', 'prestamo']
     
-    puntaje_capital = 1 if contiene_palabra(texto, palabras_capital) else 0
-    puntaje_gasto = 1 if contiene_palabra(texto, palabras_gasto) else 0
-    puntaje_ingreso = 1 if contiene_palabra(texto, palabras_ingreso) else 0
-    puntaje_retiro = 1 if contiene_palabra(texto, palabras_retiro) else 0
-    puntaje_balance = 1 if contiene_palabra(texto, palabras_balance) else 0
-    puntaje_emergencia = 1 if contiene_palabra(texto, palabras_emergencia) else 0
-    puntaje_inversion = 1 if contiene_palabra(texto, palabras_inversion) else 0
-    puntaje_deuda = 1 if contiene_palabra(texto, palabras_deuda) else 0
+    # Palabras clave para detectar el medio
+    palabras_efectivo = ['efectivo', 'efetivo', 'efettivo', 'efectibo', 'cash', 'billete', 'moneda', 'fisico', 'físico']
+    palabras_debito = ['debito', 'débito', 'tarjeta debito', 'tarjeta débito', 'td', 'visa debito']
+    palabras_credito = ['credito', 'crédito', 'tarjeta credito', 'tarjeta crédito', 'tc', 'visa credito']
     
-    # 1. BALANCE
-    if puntaje_balance > 0:
+    # ========== DETECTAR SI ES BALANCE (prioridad máxima) ==========
+    if contiene_palabra(texto, palabras_balance) or re.search(r'cu[aá]nto\s*tengo', texto):
         await balance(update, context)
         return
     
-    # 2. CAPITAL INICIAL
-    if puntaje_capital > 0 and monto and puntaje_gasto == 0:
+    # ========== DETECTAR CAPITAL INICIAL ==========
+    es_capital = contiene_palabra(texto, palabras_capital)
+    es_gasto = contiene_palabra(texto, palabras_gasto)
+    
+    if es_capital and monto and not es_gasto:
         context.user_data['capital_monto'] = monto
         context.user_data['capital_accion'] = 'inicial'
         await update.message.reply_text(
@@ -679,8 +686,17 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     
-    # 3. GASTO
-    if puntaje_gasto > 0 and monto:
+    # ========== DETECTAR MEDIO DE PAGO ==========
+    medio = "efectivo"
+    if contiene_palabra(texto, palabras_debito):
+        medio = "debito"
+    elif contiene_palabra(texto, palabras_credito):
+        medio = "credito"
+    elif contiene_palabra(texto, palabras_efectivo):
+        medio = "efectivo"
+    
+    # ========== GASTO ==========
+    if es_gasto and monto:
         concepto = extraer_concepto(texto, monto)
         if not concepto:
             concepto = "Gasto"
@@ -698,8 +714,8 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     
-    # 4. INGRESO
-    if puntaje_ingreso > 0 and monto:
+    # ========== INGRESO ==========
+    if contiene_palabra(texto, palabras_ingreso) and monto:
         context.user_data['capital_monto'] = monto
         context.user_data['capital_accion'] = 'agregar'
         await update.message.reply_text(
@@ -708,13 +724,8 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     
-    # 5. RETIRO
-    if puntaje_retiro > 0 and monto:
-        medio = "efectivo"
-        if "debito" in texto or "débito" in texto:
-            medio = "debito"
-        elif "credito" in texto or "crédito" in texto:
-            medio = "credito"
+    # ========== RETIRO ==========
+    if contiene_palabra(texto, palabras_retiro) and monto:
         context.user_data['capital_monto'] = monto
         context.user_data['capital_accion'] = 'retirar'
         await update.message.reply_text(
@@ -723,8 +734,8 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     
-    # 6. EMERGENCIA
-    if puntaje_emergencia > 0 and monto:
+    # ========== EMERGENCIA ==========
+    if contiene_palabra(texto, palabras_emergencia) and monto:
         worksheet = conectar_google_sheets(FINANZAS_SHEET)
         if guardar_movimiento_finanzas(worksheet, "Agregar emergencia", "emergencia", monto, "", "Ingreso"):
             await update.message.reply_text(f"🆘 Emergencia +${monto:,.2f}")
@@ -732,8 +743,8 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("❌ Error al guardar.")
         return
     
-    # 7. INVERSIÓN
-    if puntaje_inversion > 0 and monto:
+    # ========== INVERSIÓN ==========
+    if contiene_palabra(texto, palabras_inversion) and monto:
         worksheet = conectar_google_sheets(FINANZAS_SHEET)
         if guardar_movimiento_finanzas(worksheet, "Agregar inversion", "inversion", monto, "", "Ingreso"):
             await update.message.reply_text(f"📈 Inversión +${monto:,.2f}")
@@ -741,8 +752,8 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("❌ Error al guardar.")
         return
     
-    # 8. DEUDA
-    if puntaje_deuda > 0 and monto:
+    # ========== DEUDA ==========
+    if contiene_palabra(texto, palabras_deuda) and monto:
         nombre = extraer_concepto(texto, monto) or "Deuda"
         worksheet = conectar_google_sheets(FINANZAS_SHEET)
         if guardar_movimiento_finanzas(worksheet, f"Deuda: {nombre}", "deuda", monto, "", "Nueva deuda"):
@@ -751,6 +762,7 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("❌ Error al guardar.")
         return
     
+    # ========== SI NO SE RECONOCE NADA ==========
     await update.message.reply_text(
         "❌ No entendí tu mensaje.\n\n"
         "📌 *Ejemplos:*\n"
@@ -978,7 +990,7 @@ def main():
     
     print("✅ Bot iniciado correctamente")
     print("📸 Esperando fotos de facturas...")
-    print("🗣️ Reconocimiento de lenguaje natural ULTRA-TOLERANTE activado")
+    print("🗣️ Reconocimiento de lenguaje natural ULTRA-TOLERANTE activado (detecta errores de escritura)")
     print("🎤 Mensajes de voz activados")
     print("Presiona Ctrl+C para detener el bot\n")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
