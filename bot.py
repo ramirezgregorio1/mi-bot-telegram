@@ -64,12 +64,8 @@ FORMAS_PAGO_LIST = [
 
 # ==================== DATOS EN MEMORIA ====================
 datos_usuario = {}
-capital_efectivo = {}
-capital_debito = {}
-capital_credito = {}
 emergencia_usuario = {}
 inversion_usuario = {}
-deudas_usuario = {}
 
 # ==================== CONEXION GOOGLE SHEETS ====================
 def conectar_google_sheets(nombre_hoja=SHEET_NAME):
@@ -235,6 +231,7 @@ async def capital_inicial(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
         context.user_data['capital_monto'] = monto
+        context.user_data['capital_accion'] = 'inicial'
         await update.message.reply_text(
             f"💰 Monto: ${monto:,.2f}\n\n¿En qué medio quieres guardar este capital?",
             reply_markup=crear_teclado_medio()
@@ -278,26 +275,28 @@ async def procesar_medio_capital(update: Update, context: ContextTypes.DEFAULT_T
     
     worksheet = conectar_google_sheets(FINANZAS_SHEET)
     
+    mensaje = ""
     if accion == 'inicial':
         if guardar_movimiento_finanzas(worksheet, "Capital inicial", "capital", monto, medio, "Primer registro"):
-            await query.edit_message_text(f"✅ Capital inicial guardado: ${monto:,.2f} en {medio}")
+            mensaje = f"✅ Capital inicial guardado: ${monto:,.2f} en {medio}"
         else:
-            await query.edit_message_text("❌ Error al guardar en Google Sheets.")
+            mensaje = "❌ Error al guardar en Google Sheets."
     elif accion == 'agregar':
         if guardar_movimiento_finanzas(worksheet, "Agregar capital", "capital", monto, medio, "Ingreso extra"):
-            await query.edit_message_text(f"✅ Capital agregado: +${monto:,.2f} en {medio}")
+            mensaje = f"✅ Capital agregado: +${monto:,.2f} en {medio}"
         else:
-            await query.edit_message_text("❌ Error al guardar en Google Sheets.")
+            mensaje = "❌ Error al guardar en Google Sheets."
     elif accion == 'retirar':
         saldo_actual = obtener_saldo_medio(worksheet, "capital", medio)
         if monto > saldo_actual:
-            await query.edit_message_text(f"❌ No tienes suficiente saldo en {medio}. Saldo actual: ${saldo_actual:,.2f}")
-            return
-        if guardar_movimiento_finanzas(worksheet, "Retirar capital", "capital", -monto, medio, "Retiro"):
-            await query.edit_message_text(f"✅ Retiro registrado: -${monto:,.2f} de {medio}")
+            mensaje = f"❌ No tienes suficiente saldo en {medio}. Saldo actual: ${saldo_actual:,.2f}"
         else:
-            await query.edit_message_text("❌ Error al guardar en Google Sheets.")
+            if guardar_movimiento_finanzas(worksheet, "Retirar capital", "capital", -monto, medio, "Retiro"):
+                mensaje = f"✅ Retiro registrado: -${monto:,.2f} de {medio}"
+            else:
+                mensaje = "❌ Error al guardar en Google Sheets."
     
+    await query.edit_message_text(mensaje)
     context.user_data['capital_monto'] = 0
     context.user_data['capital_accion'] = ''
 
@@ -544,11 +543,12 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = update.effective_user.id
     
-    # Procesar selección de medio para capital
+    # ===== PROCESAR SELECCIÓN DE MEDIO PARA CAPITAL =====
     if query.data.startswith("medio_"):
         await procesar_medio_capital(update, context)
         return
     
+    # ===== PROCESAR GASTOS =====
     if user_id not in datos_usuario:
         await query.edit_message_text("No hay datos de factura. Envia una foto nuevamente.")
         return
