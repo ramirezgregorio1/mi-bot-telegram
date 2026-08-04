@@ -101,7 +101,6 @@ def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago,
 def guardar_movimiento_finanzas(worksheet, concepto, categoria, monto, medio="", nota=""):
     try:
         fecha = datetime.now().strftime("%d/%m/%Y")
-        # Guardar solo el movimiento, sin calcular saldo
         fila = [fecha, concepto, categoria, monto, medio, nota]
         worksheet.append_row(fila, value_input_option='USER_ENTERED')
         return True
@@ -114,10 +113,16 @@ def obtener_saldo_medio(worksheet, categoria, medio):
         registros = worksheet.get_all_records()
         saldo = 0
         for r in registros:
-            if r.get('Categoria') == categoria and r.get('Medio') == medio:
-                saldo += float(r.get('Monto', 0))
+            cat = r.get('Categoria', '').strip().lower()
+            med = r.get('Medio', '').strip().lower()
+            if cat == categoria and med == medio:
+                try:
+                    saldo += float(r.get('Monto', 0))
+                except:
+                    pass
         return saldo
-    except:
+    except Exception as e:
+        print(f"Error en obtener_saldo_medio: {e}")
         return 0
 
 def obtener_saldo_total(worksheet, categoria):
@@ -125,10 +130,14 @@ def obtener_saldo_total(worksheet, categoria):
         registros = worksheet.get_all_records()
         saldo = 0
         for r in registros:
-            if r.get('Categoria') == categoria:
-                saldo += float(r.get('Monto', 0))
+            if r.get('Categoria', '').strip().lower() == categoria:
+                try:
+                    saldo += float(r.get('Monto', 0))
+                except:
+                    pass
         return saldo
-    except:
+    except Exception as e:
+        print(f"Error en obtener_saldo_total: {e}")
         return 0
 
 # ==================== EXTRACCION DE DATOS DE FACTURA ====================
@@ -222,7 +231,6 @@ async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- CAPITAL ----------
 async def capital_inicial(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
         context.user_data['capital_monto'] = monto
@@ -235,7 +243,6 @@ async def capital_inicial(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📌 Uso correcto: /capital_inicial 25000")
 
 async def agregar_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
         context.user_data['capital_monto'] = monto
@@ -248,7 +255,6 @@ async def agregar_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📌 Uso correcto: /agregar_capital 1500")
 
 async def retirar_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
         context.user_data['capital_monto'] = monto
@@ -263,7 +269,7 @@ async def retirar_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def procesar_medio_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = update.effective_user.id
+    
     medio = query.data.replace("medio_", "")
     monto = context.user_data.get('capital_monto', 0)
     accion = context.user_data.get('capital_accion', 'inicial')
@@ -291,36 +297,73 @@ async def procesar_medio_capital(update: Update, context: ContextTypes.DEFAULT_T
             else:
                 mensaje = "❌ Error al guardar en Google Sheets."
     
-    await query.edit_message_text(mensaje)
+    try:
+        await query.edit_message_text(mensaje)
+    except:
+        await query.message.reply_text(mensaje)
+    
     context.user_data['capital_monto'] = 0
     context.user_data['capital_accion'] = ''
 
 # ---------- BALANCE ----------
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    worksheet = conectar_google_sheets(FINANZAS_SHEET)
-    efectivo = obtener_saldo_medio(worksheet, "capital", "efectivo")
-    debito = obtener_saldo_medio(worksheet, "capital", "debito")
-    credito = obtener_saldo_medio(worksheet, "capital", "credito")
-    total = efectivo + debito + credito
-    emergencia = obtener_saldo_total(worksheet, "emergencia")
-    inversion = obtener_saldo_total(worksheet, "inversion")
-    
-    # Obtener gastos
-    worksheet_gastos = conectar_google_sheets(SHEET_NAME)
-    registros = worksheet_gastos.get_all_records()
-    total_gastos = sum(float(r['Monto']) for r in registros if r.get('Tipo', 'gasto') == 'gasto')
-    
-    await update.message.reply_text(
-        f"📊 *Resumen Financiero*\n\n"
-        f"💰 *Capital:*\n"
-        f"💵 Efectivo: ${efectivo:,.2f}\n"
-        f"💳 Débito: ${debito:,.2f}\n"
-        f"🏦 Crédito: ${credito:,.2f}\n"
-        f"🟢 *Total:* ${total:,.2f}\n\n"
-        f"💸 Gastos: ${total_gastos:,.2f}\n\n"
-        f"🆘 Emergencia: ${emergencia:,.2f}\n"
-        f"📈 Inversiones: ${inversion:,.2f}"
-    )
+    try:
+        worksheet = conectar_google_sheets(FINANZAS_SHEET)
+        registros = worksheet.get_all_records()
+        
+        efectivo = 0
+        debito = 0
+        credito = 0
+        
+        for r in registros:
+            categoria = r.get('Categoria', '').strip().lower()
+            medio = r.get('Medio', '').strip().lower()
+            try:
+                monto = float(r.get('Monto', 0))
+            except:
+                monto = 0
+            
+            if categoria == 'capital':
+                if medio == 'efectivo':
+                    efectivo += monto
+                elif medio == 'debito':
+                    debito += monto
+                elif medio == 'credito':
+                    credito += monto
+        
+        total = efectivo + debito + credito
+        
+        worksheet_gastos = conectar_google_sheets(SHEET_NAME)
+        registros_gastos = worksheet_gastos.get_all_records()
+        total_gastos = sum(float(r.get('Monto', 0)) for r in registros_gastos if r.get('Tipo', 'gasto') == 'gasto')
+        
+        emergencia = 0
+        inversion = 0
+        for r in registros:
+            categoria = r.get('Categoria', '').strip().lower()
+            try:
+                monto = float(r.get('Monto', 0))
+            except:
+                monto = 0
+            if categoria == 'emergencia':
+                emergencia += monto
+            elif categoria == 'inversion':
+                inversion += monto
+        
+        await update.message.reply_text(
+            f"📊 *Resumen Financiero*\n\n"
+            f"💰 *Capital:*\n"
+            f"💵 Efectivo: ${efectivo:,.2f}\n"
+            f"💳 Débito: ${debito:,.2f}\n"
+            f"🏦 Crédito: ${credito:,.2f}\n"
+            f"🟢 *Total:* ${total:,.2f}\n\n"
+            f"💸 Gastos: ${total_gastos:,.2f}\n\n"
+            f"🆘 Emergencia: ${emergencia:,.2f}\n"
+            f"📈 Inversiones: ${inversion:,.2f}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error al calcular el balance: {str(e)}")
+        print(f"❌ Error en balance: {e}")
 
 async def balance_medio(update: Update, context: ContextTypes.DEFAULT_TYPE, medio):
     worksheet = conectar_google_sheets(FINANZAS_SHEET)
@@ -579,7 +622,6 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             worksheet = conectar_google_sheets(SHEET_NAME)
             if guardar_en_sheets(worksheet, datos['fecha'], datos['comercio'], datos['monto'], datos['categoria'], datos['formas_pago'], "gasto"):
                 await query.edit_message_text(f"✅ Factura guardada exitosamente!\n\n📅 Fecha: {datos['fecha']}\n🏪 Comercio: {datos['comercio']}\n💰 Monto: ${datos['monto']}\n🏷️ Categoria: {datos['categoria']}\n💳 Forma de pago: {datos['formas_pago']}")
-                # Restar del capital según el medio
                 worksheet_finanzas = conectar_google_sheets(FINANZAS_SHEET)
                 medio = "efectivo"
                 if "debito" in datos['formas_pago'].lower():
