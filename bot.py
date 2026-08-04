@@ -64,8 +64,6 @@ FORMAS_PAGO_LIST = [
 
 # ==================== DATOS EN MEMORIA ====================
 datos_usuario = {}
-emergencia_usuario = {}
-inversion_usuario = {}
 
 # ==================== CONEXION GOOGLE SHEETS ====================
 def conectar_google_sheets(nombre_hoja=SHEET_NAME):
@@ -104,8 +102,13 @@ def guardar_movimiento_finanzas(worksheet, concepto, categoria, monto, medio="",
     try:
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         fecha = datetime.now().strftime("%d/%m/%Y")
-        # Obtener el saldo actual del medio
-        saldo_actual = obtener_saldo_medio(worksheet, categoria, medio)
+        # Obtener el saldo actual sumando todos los movimientos anteriores de esta categoría y medio
+        registros = worksheet.get_all_records()
+        saldo_actual = 0
+        for r in registros:
+            if r.get('Categoria') == categoria and r.get('Medio') == medio:
+                saldo_actual += float(r.get('Monto', 0))
+        # El nuevo saldo es el saldo actual + el monto del movimiento
         nuevo_saldo = saldo_actual + monto
         fila = [fecha, concepto, categoria, monto, nuevo_saldo, medio, nota]
         worksheet.append_row(fila, value_input_option='USER_ENTERED')
