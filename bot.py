@@ -65,6 +65,52 @@ FORMAS_PAGO_LIST = [
 # ==================== DATOS EN MEMORIA ====================
 datos_usuario = {}
 
+# ==================== COINCIDENCIA APROXIMADA ====================
+def levenshtein(a, b):
+    if len(a) < len(b):
+        a, b = b, a
+    if len(b) == 0:
+        return len(a)
+    row1 = list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        row2 = [i]
+        for j in range(1, len(b) + 1):
+            if a[i-1] == b[j-1]:
+                cost = 0
+            else:
+                cost = 1
+            row2.append(min(row1[j] + 1, row2[j-1] + 1, row1[j-1] + cost))
+        row1 = row2
+    return row1[-1]
+
+def similar(palabra1, palabra2, umbral=1):
+    if len(palabra1) < 3 or len(palabra2) < 3:
+        return palabra1 == palabra2
+    if abs(len(palabra1) - len(palabra2)) > umbral:
+        return False
+    if palabra1 in palabra2 or palabra2 in palabra1:
+        return True
+    if len(palabra1) >= 3 and len(palabra2) >= 3:
+        if palabra1[:3] == palabra2[:3]:
+            return True
+    return levenshtein(palabra1, palabra2) <= umbral
+
+def contiene_palabra(texto, lista_palabras, umbral=1):
+    texto_limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ ]', '', texto.lower())
+    palabras_texto = texto_limpio.split()
+    for palabra_buscar in lista_palabras:
+        palabra_buscar = palabra_buscar.lower().strip()
+        for palabra_texto in palabras_texto:
+            if len(palabra_buscar) <= 2:
+                if palabra_buscar == palabra_texto:
+                    return True
+                continue
+            if similar(palabra_buscar, palabra_texto, umbral):
+                return True
+            if palabra_buscar in palabra_texto or palabra_texto in palabra_buscar:
+                return True
+    return False
+
 # ==================== CONEXION GOOGLE SHEETS ====================
 def conectar_google_sheets(nombre_hoja=SHEET_NAME):
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -552,36 +598,28 @@ async def total(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
-# ==================== LENGUAJE NATURAL ====================
+# ==================== FUNCIONES DE LENGUAJE NATURAL ====================
 def extraer_monto(texto):
     """Extrae el monto de cualquier texto, con soporte para comas y decimales"""
-    # Eliminar la palabra "centavos" para que no interfiera
     texto_limpio = re.sub(r'\bcentavos?\b', '', texto, flags=re.IGNORECASE)
-    
-    # Patrones para números con y sin decimales, con y sin comas
     patrones = [
         r'\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)',  # 22,853.86
         r'\$?\s*(\d{1,3}(?:,\d{3})+(?:,\d{1,2})?)',  # 22,853,86
         r'\$?\s*(\d{1,}(?:\.\d{3})+(?:,\d{1,2})?)',  # 22.853,86
-        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:\.\d{1,2})?)', # 22.853.86
         r'\$?\s*(\d{1,}(?:\.\d{1,2})?)',             # 22853.86
         r'\$?\s*(\d{1,}(?:,\d{1,2})?)',             # 22853,86
-        r'(\d+)\s*(?:pesos|peso|dólares|dolar|euros|euro|usd|mxn)',  # 350 pesos
+        r'(\d+)\s*(?:pesos|peso)',                  # 350 pesos
     ]
-    
     for patron in patrones:
         match = re.search(patron, texto_limpio)
         if match:
             monto_str = match.group(1)
-            # Limpiar el formato para convertirlo a float
             if ',' in monto_str and '.' in monto_str:
                 monto_str = monto_str.replace(',', '')
+            elif '.' in monto_str and ',' in monto_str:
+                monto_str = monto_str.replace('.', '').replace(',', '.')
             elif ',' in monto_str and '.' not in monto_str:
-                partes = monto_str.split(',')
-                if len(partes[-1]) == 3:
-                    monto_str = monto_str.replace(',', '')
-                else:
-                    monto_str = monto_str.replace(',', '.')
+                monto_str = monto_str.replace(',', '.')
             try:
                 return float(monto_str)
             except:
@@ -589,7 +627,6 @@ def extraer_monto(texto):
     return None
 
 def extraer_concepto(texto, monto):
-    """Extrae el concepto eliminando el monto y palabras comunes"""
     texto_sin_monto = re.sub(r'\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)', '', texto)
     palabras_ruido = ['gasté', 'pagué', 'compré', 'usé', 'gasto', 'pago', 'en', 'de', 'por', 'para', 'con', 'sin', 'eh', 'mmm', 'creo', 'como', 'pues', 'ahorita', 'oye', 'mira', 'bueno', 'entonces', 'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas']
     for palabra in palabras_ruido:
@@ -597,114 +634,123 @@ def extraer_concepto(texto, monto):
     concepto = ' '.join(texto_sin_monto.split()).strip()
     return concepto if concepto else None
 
+# ==================== PROCESADOR DE LENGUAJE NATURAL ====================
 async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Procesa mensajes de texto en lenguaje natural por patrones de frase completa"""
     texto_original = update.message.text
     texto = texto_original.lower().strip()
     user_id = update.effective_user.id
     
-    if texto == "menu" or texto == "/menu":
+    if texto in ["menu", "/menu"]:
         await start(update, context)
         return
     
-    # Extraer monto
     monto = extraer_monto(texto)
     
-    # ========== 1. CAPITAL INICIAL ==========
-    if re.search(r'(tengo|mi capital es|capital inicial|mi capital de|empec[ée] con)\s*\$?\s*(\d{1,}[.,]?\d*)', texto):
-        if monto:
-            context.user_data['capital_monto'] = monto
-            context.user_data['capital_accion'] = 'inicial'
-            await update.message.reply_text(
-                f"💰 Capital detectado: ${monto:,.2f}\n\n¿En qué medio quieres guardarlo?",
-                reply_markup=crear_teclado_medio()
-            )
-            return
+    palabras_capital = ['tengo', 'ten', 'teng', 'tenho', 'capital', 'capial', 'ahorro', 'ahoro', 'cuenta', 'cueta', 'saldo', 'fondo']
+    palabras_gasto = ['gaste', 'gasté', 'gast', 'pag', 'pague', 'pagué', 'compre', 'compré', 'compr', 'use', 'usé', 'gasto', 'pago', 'costo', 'costó', 'costaron', 'comida', 'super', 'mercado', 'cheetos']
+    palabras_ingreso = ['agrege', 'agregé', 'agreg', 'ingrese', 'ingresé', 'ingres', 'sume', 'sumé', 'aumente', 'aumenté', 'recibe', 'recibí', 'deposite', 'deposité', 'sueldo', 'salario', 'bono']
+    palabras_retiro = ['retire', 'retiré', 'retir', 'saque', 'saqué', 'quite', 'quité', 'sacar', 'retiro']
+    palabras_balance = ['cuanto tengo', 'cuánto tengo', 'balance', 'cuanto dinero', 'cuánto dinero', 'resumen', 'saldo actual', 'estatus']
+    palabras_emergencia = ['emergencia', 'emerncia', 'fondo', 'ahorro', 'reserva']
+    palabras_inversion = ['inversion', 'inversión', 'invierto', 'inverti', 'invertí', 'accion', 'bolsa', 'cripto', 'bitcoin']
+    palabras_deuda = ['deuda', 'debo', 'adeudo', 'credito', 'crédito', 'tarjeta', 'prestamo']
     
-    # ========== 2. INGRESO ==========
-    if re.search(r'(agregu[ée]|ingres[ée]|sum[ée]|aument[ée]|recib[ée]|deposit[ée]|depósito|ingreso)\s*\$?\s*(\d{1,}[.,]?\d*)\s*(?:a mi capital|a mi cuenta|a mi fondo)?', texto):
-        if monto:
-            context.user_data['capital_monto'] = monto
-            context.user_data['capital_accion'] = 'agregar'
-            await update.message.reply_text(
-                f"💰 Ingreso: ${monto:,.2f}\n\n¿En qué medio quieres agregarlo?",
-                reply_markup=crear_teclado_medio()
-            )
-            return
+    puntaje_capital = 1 if contiene_palabra(texto, palabras_capital) else 0
+    puntaje_gasto = 1 if contiene_palabra(texto, palabras_gasto) else 0
+    puntaje_ingreso = 1 if contiene_palabra(texto, palabras_ingreso) else 0
+    puntaje_retiro = 1 if contiene_palabra(texto, palabras_retiro) else 0
+    puntaje_balance = 1 if contiene_palabra(texto, palabras_balance) else 0
+    puntaje_emergencia = 1 if contiene_palabra(texto, palabras_emergencia) else 0
+    puntaje_inversion = 1 if contiene_palabra(texto, palabras_inversion) else 0
+    puntaje_deuda = 1 if contiene_palabra(texto, palabras_deuda) else 0
     
-    # ========== 3. RETIRO ==========
-    if re.search(r'(retir[ée]|saqu[ée]|quit[ée]|sacar|retiro)\s*\$?\s*(\d{1,}[.,]?\d*)\s*(?:de|del)?\s*(efectivo|debito|credito)?', texto):
-        if monto:
-            medio = "efectivo"
-            if "debito" in texto:
-                medio = "debito"
-            elif "credito" in texto:
-                medio = "credito"
-            context.user_data['capital_monto'] = monto
-            context.user_data['capital_accion'] = 'retirar'
-            await update.message.reply_text(
-                f"💰 Retiro: ${monto:,.2f}\n\n¿De qué medio quieres retirarlo?",
-                reply_markup=crear_teclado_medio()
-            )
-            return
-    
-    # ========== 4. GASTO ==========
-    if re.search(r'(gast[ée]|pag[ée]|compr[ée]|us[ée]|gasto|pago|compr[ée])\s*\$?\s*(\d{1,}[.,]?\d*)\s*(?:en|de)?\s*(.+)', texto):
-        if monto:
-            concepto = extraer_concepto(texto, monto)
-            if not concepto:
-                concepto = "Gasto"
-            datos_usuario[user_id] = {
-                'fecha': datetime.now().strftime("%d/%m/%Y"),
-                'comercio': concepto,
-                'monto': str(monto),
-                'categoria': None,
-                'formas_pago': None,
-                'imagen_path': None
-            }
-            await update.message.reply_text(
-                f"💰 Gasto detectado: ${monto:,.2f} en {concepto}\n\nSelecciona la categoría:",
-                reply_markup=crear_teclado_categorias()
-            )
-            return
-    
-    # ========== 5. BALANCE ==========
-    if re.search(r'(cuánto tengo|balance|cuánto dinero|resumen|mis finanzas|saldo actual|estatus|situacion)', texto):
+    # 1. BALANCE
+    if puntaje_balance > 0:
         await balance(update, context)
         return
     
-    # ========== 6. EMERGENCIA ==========
-    if re.search(r'(emergencia|fondo de emergencia|reserva)\s*\$?\s*(\d{1,}[.,]?\d*)', texto):
-        if monto:
-            worksheet = conectar_google_sheets(FINANZAS_SHEET)
-            if guardar_movimiento_finanzas(worksheet, "Agregar emergencia", "emergencia", monto, "", "Ingreso"):
-                await update.message.reply_text(f"🆘 Emergencia +${monto:,.2f}")
-            else:
-                await update.message.reply_text("❌ Error al guardar.")
-            return
+    # 2. CAPITAL INICIAL
+    if puntaje_capital > 0 and monto and puntaje_gasto == 0:
+        context.user_data['capital_monto'] = monto
+        context.user_data['capital_accion'] = 'inicial'
+        await update.message.reply_text(
+            f"💰 Capital detectado: ${monto:,.2f}\n\n¿En qué medio quieres guardarlo?",
+            reply_markup=crear_teclado_medio()
+        )
+        return
     
-    # ========== 7. INVERSIÓN ==========
-    if re.search(r'(inversi[óo]n|invierto|invert[ée]|bolsa|cripto)\s*\$?\s*(\d{1,}[.,]?\d*)', texto):
-        if monto:
-            worksheet = conectar_google_sheets(FINANZAS_SHEET)
-            if guardar_movimiento_finanzas(worksheet, "Agregar inversion", "inversion", monto, "", "Ingreso"):
-                await update.message.reply_text(f"📈 Inversión +${monto:,.2f}")
-            else:
-                await update.message.reply_text("❌ Error al guardar.")
-            return
+    # 3. GASTO
+    if puntaje_gasto > 0 and monto:
+        concepto = extraer_concepto(texto, monto)
+        if not concepto:
+            concepto = "Gasto"
+        datos_usuario[user_id] = {
+            'fecha': datetime.now().strftime("%d/%m/%Y"),
+            'comercio': concepto,
+            'monto': str(monto),
+            'categoria': None,
+            'formas_pago': None,
+            'imagen_path': None
+        }
+        await update.message.reply_text(
+            f"💰 Gasto detectado: ${monto:,.2f} en {concepto}\n\nSelecciona la categoría:",
+            reply_markup=crear_teclado_categorias()
+        )
+        return
     
-    # ========== 8. DEUDA ==========
-    if re.search(r'(deuda|debo|adeudo|crédito|tarjeta)\s*\$?\s*(\d{1,}[.,]?\d*)\s*(?:de|en)?\s*(.+)', texto):
-        if monto:
-            nombre = extraer_concepto(texto, monto) or "Deuda"
-            worksheet = conectar_google_sheets(FINANZAS_SHEET)
-            if guardar_movimiento_finanzas(worksheet, f"Deuda: {nombre}", "deuda", monto, "", "Nueva deuda"):
-                await update.message.reply_text(f"✅ Deuda registrada: ${monto:,.2f} - {nombre}")
-            else:
-                await update.message.reply_text("❌ Error al guardar.")
-            return
+    # 4. INGRESO
+    if puntaje_ingreso > 0 and monto:
+        context.user_data['capital_monto'] = monto
+        context.user_data['capital_accion'] = 'agregar'
+        await update.message.reply_text(
+            f"💰 Ingreso: ${monto:,.2f}\n\n¿En qué medio quieres agregarlo?",
+            reply_markup=crear_teclado_medio()
+        )
+        return
     
-    # ========== 9. SI NO SE RECONOCE ==========
+    # 5. RETIRO
+    if puntaje_retiro > 0 and monto:
+        medio = "efectivo"
+        if "debito" in texto or "débito" in texto:
+            medio = "debito"
+        elif "credito" in texto or "crédito" in texto:
+            medio = "credito"
+        context.user_data['capital_monto'] = monto
+        context.user_data['capital_accion'] = 'retirar'
+        await update.message.reply_text(
+            f"💰 Retiro: ${monto:,.2f}\n\n¿De qué medio quieres retirarlo?",
+            reply_markup=crear_teclado_medio()
+        )
+        return
+    
+    # 6. EMERGENCIA
+    if puntaje_emergencia > 0 and monto:
+        worksheet = conectar_google_sheets(FINANZAS_SHEET)
+        if guardar_movimiento_finanzas(worksheet, "Agregar emergencia", "emergencia", monto, "", "Ingreso"):
+            await update.message.reply_text(f"🆘 Emergencia +${monto:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar.")
+        return
+    
+    # 7. INVERSIÓN
+    if puntaje_inversion > 0 and monto:
+        worksheet = conectar_google_sheets(FINANZAS_SHEET)
+        if guardar_movimiento_finanzas(worksheet, "Agregar inversion", "inversion", monto, "", "Ingreso"):
+            await update.message.reply_text(f"📈 Inversión +${monto:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar.")
+        return
+    
+    # 8. DEUDA
+    if puntaje_deuda > 0 and monto:
+        nombre = extraer_concepto(texto, monto) or "Deuda"
+        worksheet = conectar_google_sheets(FINANZAS_SHEET)
+        if guardar_movimiento_finanzas(worksheet, f"Deuda: {nombre}", "deuda", monto, "", "Nueva deuda"):
+            await update.message.reply_text(f"✅ Deuda registrada: ${monto:,.2f} - {nombre}")
+        else:
+            await update.message.reply_text("❌ Error al guardar.")
+        return
+    
     await update.message.reply_text(
         "❌ No entendí tu mensaje.\n\n"
         "📌 *Ejemplos:*\n"
@@ -716,7 +762,7 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         "• 'Emergencia 2000' → Emergencia\n"
         "• 'Inversión 1500' → Inversión\n"
         "• 'Deuda 5000 tarjeta' → Deuda\n\n"
-        "🗣️ No importa cómo lo digas, el bot te entiende."
+        "🗣️ No importa cómo lo digas o cómo lo escribas, el bot te entiende."
     )
 
 # ==================== MANEJADOR DE AUDIOS ====================
@@ -725,26 +771,19 @@ async def manejar_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         audio = update.message.voice
         if not audio:
             return
-        
         mensaje_procesando = await update.message.reply_text("🎤 Escuchando tu audio...")
         texto_transcrito = update.message.caption or ""
-        
         if not texto_transcrito:
             archivo = await audio.get_file()
             file_path = os.path.join(BASE_DIR, f"audio_{update.effective_user.id}.ogg")
             await archivo.download_to_drive(file_path)
-            await mensaje_procesando.edit_text(
-                "❌ No se pudo transcribir el audio automáticamente.\n"
-                "📌 Por favor, escribe tu mensaje o envía un audio más claro."
-            )
+            await mensaje_procesando.edit_text("❌ No se pudo transcribir el audio automáticamente. Por favor, escribe tu mensaje o envía un audio más claro.")
             if os.path.exists(file_path):
                 os.remove(file_path)
             return
-        
         await mensaje_procesando.edit_text(f"📝 Transcrito: '{texto_transcrito}'")
         update.message.text = texto_transcrito
         await procesar_texto_natural(update, context)
-        
     except Exception as e:
         await update.message.reply_text(f"❌ Error al procesar el audio: {str(e)}")
 
@@ -939,7 +978,7 @@ def main():
     
     print("✅ Bot iniciado correctamente")
     print("📸 Esperando fotos de facturas...")
-    print("🗣️ Reconocimiento de lenguaje natural activado (por patrones de frase)")
+    print("🗣️ Reconocimiento de lenguaje natural ULTRA-TOLERANTE activado")
     print("🎤 Mensajes de voz activados")
     print("Presiona Ctrl+C para detener el bot\n")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
