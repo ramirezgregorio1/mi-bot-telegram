@@ -1,4 +1,4 @@
-import os
+ import os
 import re
 import json
 from datetime import datetime
@@ -14,6 +14,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 TELEGRAM_TOKEN = "8224897386:AAGyv-f_GqAoyfQGy9Lu-sA3NCSSA8K2LmM"
 GOOGLE_SHEET_ID = "1HK27kQ5TvAH4p0Zt6OgNkiUlR6V0JsVxcljw2arV2nI"
 SHEET_NAME = "Registro"
+FINANZAS_SHEET = "Finanzas"  # Nueva hoja para capital, emergencia e inversiones
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ===== LEE CREDENCIALES DESDE VARIABLE DE RAILWAY =====
@@ -34,6 +35,8 @@ TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 if TESSERACT_PATH and TESSERACT_PATH.strip():
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
+# ==================== CLASES Y LISTAS ====================
+
 class ColumnasSheet:
     TIMESTAMP = 0
     FECHA = 1
@@ -41,7 +44,7 @@ class ColumnasSheet:
     CATEGORIA = 3
     MONTO = 4
     FORMAS_PAGO = 5
-    TIPO = 6  # Nuevo: gasto, ingreso, emergencia, inversion
+    TIPO = 6
 
 CATEGORIAS_LIST = [
     "Supermercado",
@@ -61,14 +64,13 @@ FORMAS_PAGO_LIST = [
     "Tarjeta credito"
 ]
 
-# ==================== DATOS EN MEMORIA ====================
+# ==================== DATOS EN MEMORIA (respaldo temporal) ====================
 datos_usuario = {}
-capital_usuario = {}
-emergencia_usuario = {}
-inversion_usuario = {}
 
 # ==================== CONEXION GOOGLE SHEETS ====================
+
 def conectar_google_sheets():
+    """Conecta con Google Sheets y retorna la hoja de gastos"""
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
     client = gspread.authorize(creds)
@@ -79,6 +81,50 @@ def conectar_google_sheets():
         worksheet = sheet.add_worksheet(title=SHEET_NAME, rows=100, cols=20)
         worksheet.append_row(["Timestamp", "Fecha", "Comercio", "Categoria", "Monto", "Forma Pago", "Tipo"])
     return worksheet
+
+def conectar_google_sheets_finanzas():
+    """Conecta con Google Sheets y retorna la hoja de finanzas (capital, emergencia, inversiones)"""
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(GOOGLE_SHEET_ID)
+    try:
+        worksheet = sheet.worksheet(FINANZAS_SHEET)
+    except:
+        worksheet = sheet.add_worksheet(title=FINANZAS_SHEET, rows=100, cols=20)
+        worksheet.append_row(["Fecha", "Concepto", "Categoria", "Monto", "Saldo", "Nota"])
+    return worksheet
+
+# ==================== FUNCIONES DE FINANZAS ====================
+
+def obtener_saldo_finanzas(worksheet, categoria):
+    """Lee el saldo actual de una categoría desde Google Sheets"""
+    try:
+        registros = worksheet.get_all_records()
+        saldo = 0
+        for r in registros:
+            if r.get('Categoria') == categoria:
+                saldo += float(r.get('Monto', 0))
+        return saldo
+    except:
+        return 0
+
+def guardar_movimiento_finanzas(worksheet, concepto, categoria, monto, nota=""):
+    """Guarda un movimiento en la hoja Finanzas"""
+    try:
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        fecha = datetime.now().strftime("%d/%m/%Y")
+        # Obtener el saldo actual
+        saldo_actual = obtener_saldo_finanzas(worksheet, categoria)
+        nuevo_saldo = saldo_actual + monto
+        fila = [fecha, concepto, categoria, monto, nuevo_saldo, nota]
+        worksheet.append_row(fila, value_input_option='USER_ENTERED')
+        return True, nuevo_saldo
+    except Exception as e:
+        print(f"Error al guardar movimiento: {e}")
+        return False, 0
+
+# ==================== GUARDAR GASTOS ====================
 
 def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago, tipo="gasto"):
     try:
@@ -98,6 +144,7 @@ def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago,
         return False
 
 # ==================== EXTRACCION DE DATOS DE FACTURA ====================
+
 def extraer_datos_factura(imagen_path):
     try:
         img = Image.open(imagen_path)
@@ -115,12 +162,13 @@ def extraer_datos_factura(imagen_path):
         return "Error", "Error", "Error"
 
 # ==================== TECLADOS ====================
+
 def crear_teclado_confirmacion():
-    keyboard = [[InlineKeyboardButton("Si, guardar", callback_data="confirmar_si"), InlineKeyboardButton("No, editar", callback_data="confirmar_no")]]
+    keyboard = [[InlineKeyboardButton("✅ Sí, guardar", callback_data="confirmar_si"), InlineKeyboardButton("✏️ No, editar", callback_data="confirmar_no")]]
     return InlineKeyboardMarkup(keyboard)
 
 def crear_teclado_continuar():
-    keyboard = [[InlineKeyboardButton("Si, Continuar", callback_data="continuar"), InlineKeyboardButton("No, editar", callback_data="confirmar_no")]]
+    keyboard = [[InlineKeyboardButton("➡️ Sí, Continuar", callback_data="continuar"), InlineKeyboardButton("✏️ No, editar", callback_data="confirmar_no")]]
     return InlineKeyboardMarkup(keyboard)
 
 def crear_teclado_categorias():
@@ -137,16 +185,17 @@ def crear_teclado_formas_pago():
 
 def crear_teclado_campos():
     keyboard = [
-        [InlineKeyboardButton("Fecha", callback_data="editar_fecha")],
-        [InlineKeyboardButton("Comercio", callback_data="editar_comercio")],
-        [InlineKeyboardButton("Monto", callback_data="editar_monto")],
-        [InlineKeyboardButton("Categoria", callback_data="editar_categoria")],
-        [InlineKeyboardButton("Forma de pago", callback_data="editar_forma_pago")],
-        [InlineKeyboardButton("Cancelar", callback_data="cancelar")]
+        [InlineKeyboardButton("📅 Fecha", callback_data="editar_fecha")],
+        [InlineKeyboardButton("🏪 Comercio", callback_data="editar_comercio")],
+        [InlineKeyboardButton("💰 Monto", callback_data="editar_monto")],
+        [InlineKeyboardButton("🏷️ Categoria", callback_data="editar_categoria")],
+        [InlineKeyboardButton("💳 Forma de pago", callback_data="editar_forma_pago")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancelar")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 # ==================== COMANDOS ====================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🏦 *Bienvenido a tu Asistente Financiero Personal!*\n\n"
@@ -155,16 +204,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hola - Saludo\n"
         "/gasto - Registrar un gasto manual\n"
         "/capital_inicial - Registrar tu saldo inicial\n"
-        "/agregar_capital - Sumar dinero a tu saldo\n"
-        "/retirar_capital - Restar dinero de tu saldo\n"
+        "/ingreso - Sumar dinero a tu saldo\n"
+        "/retiro - Restar dinero de tu saldo\n"
         "/balance - Ver tu saldo actual\n"
         "/total - Ver total gastado\n"
-        "/emergencia_ver - Ver fondo de emergencia\n"
-        "/emergencia_agregar - Agregar al fondo de emergencia\n"
+        "/emergencia - Ver fondo de emergencia\n"
+        "/emergencia_ingresar - Agregar al fondo de emergencia\n"
         "/emergencia_retirar - Retirar del fondo de emergencia\n"
-        "/inversion_ver - Ver tus inversiones\n"
-        "/inversion_agregar - Agregar a inversiones\n"
-        "/inversion_retirar - Retirar de inversiones\n"
+        "/inversiones - Ver tus inversiones\n"
+        "/inversiones_ingresar - Agregar a inversiones\n"
+        "/inversiones_retirar - Retirar de inversiones\n"
         "/ayuda - Mostrar todos los comandos\n\n"
         "📸 Tambien puedes enviar una foto de un ticket y lo procesare."
     )
@@ -174,101 +223,130 @@ async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- CAPITAL ----------
 async def capital_inicial(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    """Registra el capital inicial (solo si no existe)"""
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
-        if user_id in capital_usuario:
-            await update.message.reply_text("⚠️ Ya tienes un capital registrado. Usa /agregar_capital para sumar o /retirar_capital para restar.")
+        worksheet = conectar_google_sheets_finanzas()
+        saldo_actual = obtener_saldo_finanzas(worksheet, "capital")
+        if saldo_actual > 0:
+            await update.message.reply_text("⚠️ Ya tienes un capital registrado. Usa /ingreso para sumar o /retiro para restar.")
             return
-        capital_usuario[user_id] = monto
-        await update.message.reply_text(f"✅ Capital inicial guardado: ${monto:,.2f}")
+        ok, nuevo_saldo = guardar_movimiento_finanzas(worksheet, "Capital inicial", "capital", monto, "Primer registro")
+        if ok:
+            await update.message.reply_text(f"✅ Capital inicial guardado: ${monto:,.2f}\n💰 Saldo actual: ${nuevo_saldo:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar en Google Sheets.")
     except:
         await update.message.reply_text("📌 Uso correcto: /capital_inicial 25000")
 
-async def agregar_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Suma dinero al capital (ingresos)"""
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
-        if user_id not in capital_usuario:
-            await update.message.reply_text("❌ No has registrado capital inicial. Usa /capital_inicial 25000")
-            return
-        capital_usuario[user_id] += monto
-        await update.message.reply_text(f"✅ Capital agregado: +${monto:,.2f}\n💰 Nuevo saldo: ${capital_usuario[user_id]:,.2f}")
+        worksheet = conectar_google_sheets_finanzas()
+        saldo_actual = obtener_saldo_finanzas(worksheet, "capital")
+        ok, nuevo_saldo = guardar_movimiento_finanzas(worksheet, "Ingreso", "capital", monto, "Ingreso registrado")
+        if ok:
+            await update.message.reply_text(f"✅ Ingreso registrado: +${monto:,.2f}\n💰 Nuevo saldo: ${nuevo_saldo:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar en Google Sheets.")
     except:
-        await update.message.reply_text("📌 Uso correcto: /agregar_capital 1500")
+        await update.message.reply_text("📌 Uso correcto: /ingreso 1500")
 
-async def retirar_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def retiro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resta dinero del capital (retiros)"""
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
-        if user_id not in capital_usuario:
-            await update.message.reply_text("❌ No has registrado capital inicial. Usa /capital_inicial 25000")
+        worksheet = conectar_google_sheets_finanzas()
+        saldo_actual = obtener_saldo_finanzas(worksheet, "capital")
+        if monto > saldo_actual:
+            await update.message.reply_text(f"❌ No tienes suficiente saldo. Saldo actual: ${saldo_actual:,.2f}")
             return
-        if monto > capital_usuario[user_id]:
-            await update.message.reply_text(f"❌ No tienes suficiente saldo. Saldo actual: ${capital_usuario[user_id]:,.2f}")
-            return
-        capital_usuario[user_id] -= monto
-        await update.message.reply_text(f"✅ Retiro registrado: -${monto:,.2f}\n💰 Nuevo saldo: ${capital_usuario[user_id]:,.2f}")
+        ok, nuevo_saldo = guardar_movimiento_finanzas(worksheet, "Retiro", "capital", -monto, "Retiro registrado")
+        if ok:
+            await update.message.reply_text(f"✅ Retiro registrado: -${monto:,.2f}\n💰 Nuevo saldo: ${nuevo_saldo:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar en Google Sheets.")
     except:
-        await update.message.reply_text("📌 Uso correcto: /retirar_capital 500")
+        await update.message.reply_text("📌 Uso correcto: /retiro 500")
 
 # ---------- EMERGENCIA ----------
-async def emergencia_ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    saldo = emergencia_usuario.get(user_id, 0)
+async def emergencia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ver el fondo de emergencia"""
+    worksheet = conectar_google_sheets_finanzas()
+    saldo = obtener_saldo_finanzas(worksheet, "emergencia")
     await update.message.reply_text(f"🆘 *Fondo de Emergencia:* ${saldo:,.2f}")
 
-async def emergencia_agregar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def emergencia_ingresar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Agregar al fondo de emergencia"""
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
-        emergencia_usuario[user_id] = emergencia_usuario.get(user_id, 0) + monto
-        await update.message.reply_text(f"✅ Emergencia +${monto:,.2f}\n🆘 Total: ${emergencia_usuario[user_id]:,.2f}")
+        worksheet = conectar_google_sheets_finanzas()
+        ok, nuevo_saldo = guardar_movimiento_finanzas(worksheet, "Ingreso a emergencia", "emergencia", monto, "Agregado a emergencia")
+        if ok:
+            await update.message.reply_text(f"✅ Emergencia +${monto:,.2f}\n🆘 Total: ${nuevo_saldo:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar en Google Sheets.")
     except:
-        await update.message.reply_text("📌 Uso correcto: /emergencia_agregar 1000")
+        await update.message.reply_text("📌 Uso correcto: /emergencia_ingresar 1000")
 
 async def emergencia_retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    """Retirar del fondo de emergencia"""
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
-        if monto > emergencia_usuario.get(user_id, 0):
-            await update.message.reply_text(f"❌ No tienes suficiente en emergencia. Saldo: ${emergencia_usuario.get(user_id, 0):,.2f}")
+        worksheet = conectar_google_sheets_finanzas()
+        saldo_actual = obtener_saldo_finanzas(worksheet, "emergencia")
+        if monto > saldo_actual:
+            await update.message.reply_text(f"❌ No tienes suficiente en emergencia. Saldo: ${saldo_actual:,.2f}")
             return
-        emergencia_usuario[user_id] -= monto
-        await update.message.reply_text(f"✅ Retiro de emergencia: -${monto:,.2f}\n🆘 Total: ${emergencia_usuario[user_id]:,.2f}")
+        ok, nuevo_saldo = guardar_movimiento_finanzas(worksheet, "Retiro de emergencia", "emergencia", -monto, "Retiro de emergencia")
+        if ok:
+            await update.message.reply_text(f"✅ Retiro de emergencia: -${monto:,.2f}\n🆘 Total: ${nuevo_saldo:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar en Google Sheets.")
     except:
         await update.message.reply_text("📌 Uso correcto: /emergencia_retirar 500")
 
 # ---------- INVERSIONES ----------
-async def inversion_ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    saldo = inversion_usuario.get(user_id, 0)
+async def inversiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ver las inversiones"""
+    worksheet = conectar_google_sheets_finanzas()
+    saldo = obtener_saldo_finanzas(worksheet, "inversion")
     await update.message.reply_text(f"📈 *Inversiones:* ${saldo:,.2f}")
 
-async def inversion_agregar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def inversiones_ingresar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Agregar a inversiones"""
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
-        inversion_usuario[user_id] = inversion_usuario.get(user_id, 0) + monto
-        await update.message.reply_text(f"✅ Inversion +${monto:,.2f}\n📈 Total: ${inversion_usuario[user_id]:,.2f}")
+        worksheet = conectar_google_sheets_finanzas()
+        ok, nuevo_saldo = guardar_movimiento_finanzas(worksheet, "Ingreso a inversiones", "inversion", monto, "Agregado a inversiones")
+        if ok:
+            await update.message.reply_text(f"✅ Inversión +${monto:,.2f}\n📈 Total: ${nuevo_saldo:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar en Google Sheets.")
     except:
-        await update.message.reply_text("📌 Uso correcto: /inversion_agregar 1000")
+        await update.message.reply_text("📌 Uso correcto: /inversiones_ingresar 1000")
 
-async def inversion_retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def inversiones_retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Retirar de inversiones"""
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
-        if monto > inversion_usuario.get(user_id, 0):
-            await update.message.reply_text(f"❌ No tienes suficiente en inversiones. Saldo: ${inversion_usuario.get(user_id, 0):,.2f}")
+        worksheet = conectar_google_sheets_finanzas()
+        saldo_actual = obtener_saldo_finanzas(worksheet, "inversion")
+        if monto > saldo_actual:
+            await update.message.reply_text(f"❌ No tienes suficiente en inversiones. Saldo: ${saldo_actual:,.2f}")
             return
-        inversion_usuario[user_id] -= monto
-        await update.message.reply_text(f"✅ Retiro de inversion: -${monto:,.2f}\n📈 Total: ${inversion_usuario[user_id]:,.2f}")
+        ok, nuevo_saldo = guardar_movimiento_finanzas(worksheet, "Retiro de inversiones", "inversion", -monto, "Retiro de inversiones")
+        if ok:
+            await update.message.reply_text(f"✅ Retiro de inversión: -${monto:,.2f}\n📈 Total: ${nuevo_saldo:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar en Google Sheets.")
     except:
-        await update.message.reply_text("📌 Uso correcto: /inversion_retirar 500")
+        await update.message.reply_text("📌 Uso correcto: /inversiones_retirar 500")
 
 # ---------- GASTO MANUAL ----------
 async def gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    """Registra un gasto manual"""
     try:
         texto = ' '.join(context.args)
         monto_match = re.search(r'(\d{1,}[.,]\d{0,2})', texto)
@@ -276,7 +354,7 @@ async def gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         concepto = texto.replace(monto_match.group(1), '').strip()
         if not concepto:
             concepto = "Gasto manual"
-        datos_usuario[user_id] = {
+        datos_usuario[update.effective_user.id] = {
             'fecha': datetime.now().strftime("%d/%m/%Y"),
             'comercio': concepto,
             'monto': str(monto),
@@ -291,20 +369,22 @@ async def gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- BALANCE ----------
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    capital = capital_usuario.get(user_id, 0)
-    emergencia = emergencia_usuario.get(user_id, 0)
-    inversion = inversion_usuario.get(user_id, 0)
+    """Muestra el resumen financiero completo"""
+    worksheet_finanzas = conectar_google_sheets_finanzas()
+    capital = obtener_saldo_finanzas(worksheet_finanzas, "capital")
+    emergencia = obtener_saldo_finanzas(worksheet_finanzas, "emergencia")
+    inversion = obtener_saldo_finanzas(worksheet_finanzas, "inversion")
+    
     try:
-        worksheet = conectar_google_sheets()
-        registros = worksheet.get_all_records()
+        worksheet_gastos = conectar_google_sheets()
+        registros = worksheet_gastos.get_all_records()
         total_gastos = sum(float(r['Monto']) for r in registros if r.get('Tipo', 'gasto') == 'gasto')
-        saldo = capital - total_gastos
+        
         await update.message.reply_text(
             f"📊 *Resumen Financiero*\n\n"
             f"💰 Capital: ${capital:,.2f}\n"
             f"💸 Gastos: ${total_gastos:,.2f}\n"
-            f"🟢 Saldo: ${saldo:,.2f}\n\n"
+            f"🟢 Saldo disponible: ${capital - total_gastos:,.2f}\n\n"
             f"🆘 Emergencia: ${emergencia:,.2f}\n"
             f"📈 Inversiones: ${inversion:,.2f}"
         )
@@ -313,6 +393,7 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- TOTAL GASTADO ----------
 async def total(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra el total gastado y por categoría"""
     try:
         worksheet = conectar_google_sheets()
         registros = worksheet.get_all_records()
@@ -335,6 +416,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
 # ==================== MANEJADOR DE FOTOS ====================
+
 async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = update.effective_user.id
@@ -366,6 +448,7 @@ async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Error completo: {e}")
 
 # ==================== MANEJADOR DE BOTONES ====================
+
 async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -374,11 +457,13 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("No hay datos de factura. Envia una foto nuevamente.")
         return
     datos = datos_usuario[user_id]
+    
     if query.data.startswith("cat_"):
         categoria_seleccionada = query.data[4:]
         datos_usuario[user_id]['categoria'] = categoria_seleccionada
         await query.edit_message_text(f"🏷️ Categoria: {categoria_seleccionada}\nSelecciona la forma de pago:", reply_markup=crear_teclado_formas_pago())
         return
+    
     if query.data.startswith("fp_"):
         forma_pago_seleccionada = query.data[3:]
         datos_usuario[user_id]['formas_pago'] = forma_pago_seleccionada
@@ -392,6 +477,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ¿Son correctos?"""
         await query.edit_message_text(mensaje, reply_markup=crear_teclado_confirmacion())
         return
+    
     if query.data == "continuar":
         if datos['categoria'] is None:
             await query.edit_message_text("Selecciona la categoria:", reply_markup=crear_teclado_categorias())
@@ -399,13 +485,27 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif datos['formas_pago'] is None:
             await query.edit_message_text("Selecciona la forma de pago:", reply_markup=crear_teclado_formas_pago())
             return
+        # Si ya tiene ambos, mostrar confirmación
+        mensaje = f"""📋 Datos finales:
+📅 Fecha: {datos['fecha']}
+🏪 Comercio: {datos['comercio']}
+💰 Monto: ${datos['monto']}
+🏷️ Categoria: {datos['categoria']}
+💳 Forma de pago: {datos['formas_pago']}
+
+¿Son correctos?"""
+        await query.edit_message_text(mensaje, reply_markup=crear_teclado_confirmacion())
+        return
+    
     if query.data == "confirmar_si":
         try:
             worksheet = conectar_google_sheets()
+            # Guardar el gasto
             if guardar_en_sheets(worksheet, datos['fecha'], datos['comercio'], datos['monto'], datos['categoria'], datos['formas_pago'], "gasto"):
+                # Restar del capital
+                worksheet_finanzas = conectar_google_sheets_finanzas()
+                guardar_movimiento_finanzas(worksheet_finanzas, f"Gasto: {datos['comercio']}", "capital", -float(datos['monto']), f"Categoria: {datos['categoria']}")
                 await query.edit_message_text(f"✅ Factura guardada exitosamente!\n\n📅 Fecha: {datos['fecha']}\n🏪 Comercio: {datos['comercio']}\n💰 Monto: ${datos['monto']}\n🏷️ Categoria: {datos['categoria']}\n💳 Forma de pago: {datos['formas_pago']}")
-                if 'capital_usuario' in globals() and user_id in capital_usuario:
-                    capital_usuario[user_id] -= float(datos['monto'])
             else:
                 await query.edit_message_text("❌ Error al guardar en Google Sheets.")
             if datos['imagen_path'] and os.path.exists(datos['imagen_path']):
@@ -413,8 +513,10 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del datos_usuario[user_id]
         except Exception as e:
             await query.edit_message_text(f"❌ Error: {str(e)}")
+    
     elif query.data == "confirmar_no":
         await query.edit_message_text("¿Qué dato deseas cambiar?", reply_markup=crear_teclado_campos())
+    
     elif query.data == "editar_fecha":
         datos_usuario[user_id]['editando'] = 'fecha'
         await query.edit_message_text(f"📅 Fecha actual: {datos['fecha']}\nEscribe la nueva fecha (DD/MM/YYYY):")
@@ -433,6 +535,8 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(datos['imagen_path'])
         del datos_usuario[user_id]
         await query.edit_message_text("❌ Operación cancelada.")
+
+# ==================== MANEJADOR DE TEXTO ====================
 
 async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -470,6 +574,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensaje, reply_markup=crear_teclado_confirmacion())
 
 # ==================== MAIN ====================
+
 def main():
     print("🤖 Iniciando bot de facturas...")
     if not TELEGRAM_TOKEN:
@@ -481,28 +586,29 @@ def main():
     if not os.path.exists(CREDENTIALS_FILE):
         print("❌ ERROR: No se encuentra el archivo credenciales.json")
         return
+    
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # Comandos
+    # Comandos principales
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("hola", hola))
     app.add_handler(CommandHandler("gasto", gasto))
     app.add_handler(CommandHandler("capital_inicial", capital_inicial))
-    app.add_handler(CommandHandler("agregar_capital", agregar_capital))
-    app.add_handler(CommandHandler("retirar_capital", retirar_capital))
+    app.add_handler(CommandHandler("ingreso", ingreso))
+    app.add_handler(CommandHandler("retiro", retiro))
     app.add_handler(CommandHandler("balance", balance))
     app.add_handler(CommandHandler("total", total))
     app.add_handler(CommandHandler("ayuda", ayuda))
     
     # Emergencia
-    app.add_handler(CommandHandler("emergencia_ver", emergencia_ver))
-    app.add_handler(CommandHandler("emergencia_agregar", emergencia_agregar))
+    app.add_handler(CommandHandler("emergencia", emergencia))
+    app.add_handler(CommandHandler("emergencia_ingresar", emergencia_ingresar))
     app.add_handler(CommandHandler("emergencia_retirar", emergencia_retirar))
     
     # Inversiones
-    app.add_handler(CommandHandler("inversion_ver", inversion_ver))
-    app.add_handler(CommandHandler("inversion_agregar", inversion_agregar))
-    app.add_handler(CommandHandler("inversion_retirar", inversion_retirar))
+    app.add_handler(CommandHandler("inversiones", inversiones))
+    app.add_handler(CommandHandler("inversiones_ingresar", inversiones_ingresar))
+    app.add_handler(CommandHandler("inversiones_retirar", inversiones_retirar))
     
     # Manejadores
     app.add_handler(MessageHandler(filters.PHOTO, manejar_foto))
