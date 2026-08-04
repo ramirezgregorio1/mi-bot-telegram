@@ -554,16 +554,34 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== LENGUAJE NATURAL ====================
 def extraer_monto(texto):
-    """Extrae el monto de cualquier texto"""
+    """Extrae el monto de cualquier texto, con soporte para comas y decimales"""
+    # Eliminar la palabra "centavos" para que no interfiera
+    texto_limpio = re.sub(r'\bcentavos?\b', '', texto, flags=re.IGNORECASE)
+    
+    # Patrones para números con y sin decimales, con y sin comas
     patrones = [
-        r'\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)',
-        r'(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)',
-        r'(\d+)\s*(?:pesos|peso)',
+        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)',  # 22,853.86
+        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:,\d{1,2})?)',  # 22,853,86
+        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:,\d{1,2})?)',  # 22.853,86
+        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:\.\d{1,2})?)', # 22.853.86
+        r'\$?\s*(\d{1,}(?:\.\d{1,2})?)',             # 22853.86
+        r'\$?\s*(\d{1,}(?:,\d{1,2})?)',             # 22853,86
+        r'(\d+)\s*(?:pesos|peso|dólares|dolar|euros|euro|usd|mxn)',  # 350 pesos
     ]
+    
     for patron in patrones:
-        match = re.search(patron, texto)
+        match = re.search(patron, texto_limpio)
         if match:
-            monto_str = match.group(1).replace('.', '').replace(',', '.')
+            monto_str = match.group(1)
+            # Limpiar el formato para convertirlo a float
+            if ',' in monto_str and '.' in monto_str:
+                monto_str = monto_str.replace(',', '')
+            elif ',' in monto_str and '.' not in monto_str:
+                partes = monto_str.split(',')
+                if len(partes[-1]) == 3:
+                    monto_str = monto_str.replace(',', '')
+                else:
+                    monto_str = monto_str.replace(',', '.')
             try:
                 return float(monto_str)
             except:
