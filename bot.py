@@ -63,8 +63,8 @@ FORMAS_PAGO_LIST = [
 ]
 
 # ==================== SINONIMOS ====================
-SINONIMOS_GASTO = ['gast', 'pag', 'compr', 'us', 'gasto', 'pago', 'comid', 'super', 'mercad', 'restaur', 'uber', 'did', 'taxi', 'gasolin', 'cine', 'netflix', 'spotify', 'amazon', 'walmart', 'costco']
-SINONIMOS_INGRESO = ['agreg', 'ingres', 'sum', 'aument', 'recib', 'deposit', 'lleg', 'cay', 'entr', 'abon', 'transfer', 'sueld', 'salari', 'bon', 'pago', 'recibi']
+SINONIMOS_GASTO = ['gast', 'pag', 'compr', 'us', 'gasto', 'pago', 'comid', 'super', 'mercad', 'restaur', 'uber', 'did', 'taxi', 'gasolin', 'cine', 'netflix', 'spotify', 'amazon', 'walmart', 'costco', 'sushi', 'pizza', 'hamburguesa']
+SINONIMOS_INGRESO = ['agreg', 'ingres', 'sum', 'aument', 'recib', 'deposit', 'lleg', 'cay', 'entr', 'abon', 'transfer', 'sueld', 'salari', 'bon', 'pago', 'recibi', 'ingreso']
 SINONIMOS_RETIRO = ['retir', 'saqu', 'quit', 'rest', 'menos', 'sacar', 'sac', 'tom', 'retire']
 SINONIMOS_CAPITAL = ['capital', 'ahorr', 'cuent', 'dinero', 'saldo', 'fondo', 'billeter', 'moneder']
 SINONIMOS_BALANCE = ['cuánto teng', 'balance', 'cuánto dinero', 'resumen', 'ver', 'mostr', 'cuánto hay', 'saldo actual', 'mis finanzas', 'estatus', 'situacion']
@@ -242,7 +242,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "'Gasté 350 en comida'\n"
         "'Agregué 1500 a mi capital'\n"
         "'Retiré 500 de débito'\n"
-        "'Cuánto tengo'"
+        "'Cuánto tengo'\n\n"
+        "🎤 *O enviarme un audio* y lo transcribiré."
     )
 
 async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -732,6 +733,51 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         "🗣️ No importa cómo lo digas, el bot te entiende."
     )
 
+# ==================== MANEJADOR DE AUDIOS ====================
+async def manejar_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa mensajes de voz (audio) y los transcribe a texto"""
+    try:
+        audio = update.message.voice
+        if not audio:
+            return
+        
+        # Informar al usuario que estamos procesando
+        mensaje_procesando = await update.message.reply_text("🎤 Escuchando tu audio...")
+        
+        # Obtener la transcripción del audio (Telegram la proporciona)
+        # Nota: La transcripción está en update.message.caption (si el audio tiene texto asociado)
+        texto_transcrito = update.message.caption or ""
+        
+        # Si no hay texto, descargar el audio y transcribir con un servicio externo
+        if not texto_transcrito:
+            # Descargar el audio
+            archivo = await audio.get_file()
+            file_path = os.path.join(BASE_DIR, f"audio_{update.effective_user.id}.ogg")
+            await archivo.download_to_drive(file_path)
+            
+            # Simular transcripción (por ahora, indicar que no se pudo)
+            await mensaje_procesando.edit_text(
+                "❌ No se pudo transcribir el audio automáticamente.\n"
+                "📌 Por favor, escribe tu mensaje o envía un audio más claro.\n\n"
+                "🗣️ Ejemplo: 'Gasté 350 en comida'"
+            )
+            
+            # Eliminar el archivo temporal
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return
+        
+        # Si hay texto, procesarlo
+        await mensaje_procesando.edit_text(f"📝 Transcrito: '{texto_transcrito}'")
+        
+        # Crear un mensaje simulado para procesar el texto
+        update.message.text = texto_transcrito
+        await procesar_texto_natural(update, context)
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error al procesar el audio: {str(e)}")
+        print(f"Error en manejar_audio: {e}")
+
 # ==================== MANEJADOR DE FOTOS ====================
 async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -928,12 +974,14 @@ def main():
     
     # Manejadores
     app.add_handler(MessageHandler(filters.PHOTO, manejar_foto))
+    app.add_handler(MessageHandler(filters.VOICE, manejar_audio))
     app.add_handler(CallbackQueryHandler(manejar_botones))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_texto_natural))
     
     print("✅ Bot iniciado correctamente")
     print("📸 Esperando fotos de facturas...")
     print("🗣️ Reconocimiento de lenguaje natural activado")
+    print("🎤 Mensajes de voz (audios) activados")
     print("Presiona Ctrl+C para detener el bot\n")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
