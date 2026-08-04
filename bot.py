@@ -62,6 +62,19 @@ FORMAS_PAGO_LIST = [
     "Tarjeta credito"
 ]
 
+# ==================== SINONIMOS ====================
+SINONIMOS_GASTO = ['gast', 'pag', 'compr', 'us', 'gasto', 'pago', 'comid', 'super', 'mercad', 'restaur', 'uber', 'did', 'taxi', 'gasolin', 'cine', 'netflix', 'spotify', 'amazon', 'walmart', 'costco']
+SINONIMOS_INGRESO = ['agreg', 'ingres', 'sum', 'aument', 'recib', 'deposit', 'lleg', 'cay', 'entr', 'abon', 'transfer', 'sueld', 'salari', 'bon', 'pago', 'recibi']
+SINONIMOS_RETIRO = ['retir', 'saqu', 'quit', 'rest', 'menos', 'sacar', 'sac', 'tom', 'retire']
+SINONIMOS_CAPITAL = ['capital', 'ahorr', 'cuent', 'dinero', 'saldo', 'fondo', 'billeter', 'moneder']
+SINONIMOS_BALANCE = ['cuánto teng', 'balance', 'cuánto dinero', 'resumen', 'ver', 'mostr', 'cuánto hay', 'saldo actual', 'mis finanzas', 'estatus', 'situacion']
+SINONIMOS_EMERGENCIA = ['emergenc', 'fondo', 'ahorro', 'guardad', 'reserv', 'colchon', 'previs', 'urgenc']
+SINONIMOS_INVERSION = ['invers', 'inviert', 'invert', 'accion', 'bolsa', 'cripto', 'bitcoin', 'ethereum', 'usdt', 'sp500']
+SINONIMOS_DEUDA = ['deuda', 'debo', 'adeud', 'credito', 'tarjet', 'prestam', 'fiado', 'letra', 'cuot']
+SINONIMOS_EFECTIVO = ['efectiv', 'cash', 'billete', 'moneda', 'fisico']
+SINONIMOS_DEBITO = ['debit', 'debito', 'tarjeta deb', 'visa deb', 'mastercard deb']
+SINONIMOS_CREDITO = ['credit', 'credito', 'tarjeta cred', 'visa cred', 'mastercard cred']
+
 # ==================== DATOS EN MEMORIA ====================
 datos_usuario = {}
 
@@ -224,11 +237,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/deuda_pagar - Pagar parte de una deuda\n"
         "/deuda_ver - Ver resumen de deudas\n"
         "/ayuda - Mostrar todos los comandos\n\n"
-        "📸 Tambien puedes enviar una foto de un ticket y lo procesare."
+        "📸 Tambien puedes enviar una foto de un ticket y lo procesare.\n\n"
+        "🗣️ *También puedes hablarme naturalmente:*\n"
+        "'Gasté 350 en comida'\n"
+        "'Agregué 1500 a mi capital'\n"
+        "'Retiré 500 de débito'\n"
+        "'Cuánto tengo'"
     )
 
 async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("¡Hola! ¿Cómo estás? Envía una foto de tu factura o usa /gasto para registrar manualmente.")
+    await update.message.reply_text("¡Hola! ¿Cómo estás? Envía una foto de tu factura, usa /gasto o simplemente dime 'Gasté 350 en comida'.")
 
 # ---------- CAPITAL ----------
 async def capital_inicial(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -545,6 +563,175 @@ async def total(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
+# ==================== LENGUAJE NATURAL (ULTRA TOLERANTE) ====================
+def extraer_monto(texto):
+    """Extrae el monto de cualquier texto, sin importar cómo esté escrito"""
+    patrones = [
+        r'\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)',
+        r'(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)',
+        r'(\d+)\s*(?:pesos|peso|dólares|dolar|euros|euro|usd|mxn)',
+    ]
+    for patron in patrones:
+        match = re.search(patron, texto)
+        if match:
+            monto_str = match.group(1).replace('.', '').replace(',', '.')
+            try:
+                return float(monto_str)
+            except:
+                pass
+    return None
+
+def extraer_concepto(texto, monto):
+    """Extrae el concepto eliminando el monto y palabras comunes"""
+    texto_sin_monto = re.sub(r'\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)', '', texto)
+    palabras_ruido = ['gasté', 'pagué', 'compré', 'usé', 'gasto', 'pago', 'en', 'de', 'por', 'para', 'con', 'sin', 'eh', 'mmm', 'creo', 'como', 'pues', 'ahorita', 'oye', 'mira', 'bueno', 'entonces', 'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas']
+    for palabra in palabras_ruido:
+        texto_sin_monto = texto_sin_monto.replace(palabra, '')
+    concepto = ' '.join(texto_sin_monto.split()).strip()
+    return concepto if concepto else None
+
+async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa mensajes de texto en lenguaje natural con tolerancia extrema"""
+    texto = update.message.text.lower().strip()
+    user_id = update.effective_user.id
+    
+    if texto == "menu" or texto == "/menu":
+        await start(update, context)
+        return
+    
+    # Extraer monto
+    monto = extraer_monto(texto)
+    
+    # ========== DETECTAR INTENCIÓN ==========
+    es_gasto = any(p in texto for p in SINONIMOS_GASTO)
+    es_ingreso = any(p in texto for p in SINONIMOS_INGRESO)
+    es_retiro = any(p in texto for p in SINONIMOS_RETIRO)
+    es_capital = any(p in texto for p in SINONIMOS_CAPITAL) and not es_gasto and not es_ingreso and not es_retiro
+    es_balance = any(p in texto for p in SINONIMOS_BALANCE)
+    es_emergencia = any(p in texto for p in SINONIMOS_EMERGENCIA)
+    es_inversion = any(p in texto for p in SINONIMOS_INVERSION)
+    es_deuda = any(p in texto for p in SINONIMOS_DEUDA)
+    
+    # Detectar medio de pago
+    es_efectivo = any(p in texto for p in SINONIMOS_EFECTIVO)
+    es_debito = any(p in texto for p in SINONIMOS_DEBITO)
+    es_credito = any(p in texto for p in SINONIMOS_CREDITO)
+    
+    # Si no hay monto y no es balance, responder
+    if not monto and not es_balance:
+        await update.message.reply_text(
+            "❌ No encontré un monto válido.\n\n"
+            "📌 *Ejemplos:* 'Gasté 350 en comida' o 'Agregué 1500'\n\n"
+            "🗣️ Para ver el menú, escribe /menu"
+        )
+        return
+    
+    # ========== DETECTAR MEDIO ==========
+    medio = "efectivo"
+    if es_debito:
+        medio = "debito"
+    elif es_credito:
+        medio = "credito"
+    
+    # ========== PROCESAR SEGÚN INTENCIÓN ==========
+    
+    # 1. GASTO
+    if es_gasto and monto:
+        concepto = extraer_concepto(texto, monto)
+        if not concepto:
+            concepto = "Gasto"
+        datos_usuario[user_id] = {
+            'fecha': datetime.now().strftime("%d/%m/%Y"),
+            'comercio': concepto,
+            'monto': str(monto),
+            'categoria': None,
+            'formas_pago': None,
+            'imagen_path': None
+        }
+        await update.message.reply_text(
+            f"💰 Gasto detectado: ${monto:,.2f} en {concepto}\n\nSelecciona la categoría:",
+            reply_markup=crear_teclado_categorias()
+        )
+        return
+    
+    # 2. INGRESO
+    if es_ingreso and monto:
+        context.user_data['capital_monto'] = monto
+        context.user_data['capital_accion'] = 'agregar'
+        await update.message.reply_text(
+            f"💰 Ingreso: ${monto:,.2f}\n\n¿En qué medio quieres agregarlo?",
+            reply_markup=crear_teclado_medio()
+        )
+        return
+    
+    # 3. RETIRO
+    if es_retiro and monto:
+        context.user_data['capital_monto'] = monto
+        context.user_data['capital_accion'] = 'retirar'
+        await update.message.reply_text(
+            f"💰 Retiro: ${monto:,.2f}\n\n¿De qué medio quieres retirarlo?",
+            reply_markup=crear_teclado_medio()
+        )
+        return
+    
+    # 4. CAPITAL INICIAL
+    if es_capital and monto:
+        context.user_data['capital_monto'] = monto
+        context.user_data['capital_accion'] = 'inicial'
+        await update.message.reply_text(
+            f"💰 Capital: ${monto:,.2f}\n\n¿En qué medio quieres guardarlo?",
+            reply_markup=crear_teclado_medio()
+        )
+        return
+    
+    # 5. BALANCE
+    if es_balance:
+        await balance(update, context)
+        return
+    
+    # 6. EMERGENCIA
+    if es_emergencia and monto:
+        worksheet = conectar_google_sheets(FINANZAS_SHEET)
+        if guardar_movimiento_finanzas(worksheet, "Agregar emergencia", "emergencia", monto, "", "Ingreso"):
+            await update.message.reply_text(f"🆘 Emergencia +${monto:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar.")
+        return
+    
+    # 7. INVERSIÓN
+    if es_inversion and monto:
+        worksheet = conectar_google_sheets(FINANZAS_SHEET)
+        if guardar_movimiento_finanzas(worksheet, "Agregar inversion", "inversion", monto, "", "Ingreso"):
+            await update.message.reply_text(f"📈 Inversión +${monto:,.2f}")
+        else:
+            await update.message.reply_text("❌ Error al guardar.")
+        return
+    
+    # 8. DEUDA
+    if es_deuda and monto:
+        nombre = extraer_concepto(texto, monto) or "Deuda"
+        worksheet = conectar_google_sheets(FINANZAS_SHEET)
+        if guardar_movimiento_finanzas(worksheet, f"Deuda: {nombre}", "deuda", monto, "", "Nueva deuda"):
+            await update.message.reply_text(f"✅ Deuda registrada: ${monto:,.2f} - {nombre}")
+        else:
+            await update.message.reply_text("❌ Error al guardar.")
+        return
+    
+    # 9. SI NO SE RECONOCE NADA
+    await update.message.reply_text(
+        "❌ No entendí tu mensaje.\n\n"
+        "📌 *Ejemplos:*\n"
+        "• 'Gasté 350 en comida'\n"
+        "• 'Agregué 1500 a mi capital'\n"
+        "• 'Retiré 500 de débito'\n"
+        "• 'Mi capital es 23000'\n"
+        "• 'Cuánto tengo'\n"
+        "• 'Emergencia 2000'\n"
+        "• 'Inversión 1500'\n"
+        "• 'Deuda 5000 tarjeta'\n\n"
+        "🗣️ No importa cómo lo digas, el bot te entiende."
+    )
+
 # ==================== MANEJADOR DE FOTOS ====================
 async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -713,6 +900,7 @@ def main():
     app.add_handler(CommandHandler("gasto", gasto))
     app.add_handler(CommandHandler("total", total))
     app.add_handler(CommandHandler("ayuda", ayuda))
+    app.add_handler(CommandHandler("menu", start))
     
     # Capital
     app.add_handler(CommandHandler("capital_inicial", capital_inicial))
@@ -741,10 +929,11 @@ def main():
     # Manejadores
     app.add_handler(MessageHandler(filters.PHOTO, manejar_foto))
     app.add_handler(CallbackQueryHandler(manejar_botones))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_texto_natural))
     
     print("✅ Bot iniciado correctamente")
     print("📸 Esperando fotos de facturas...")
+    print("🗣️ Reconocimiento de lenguaje natural activado")
     print("Presiona Ctrl+C para detener el bot\n")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
