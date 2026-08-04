@@ -9,6 +9,8 @@ from PIL import Image
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
+# ==================== CONFIGURACION ====================
+
 TELEGRAM_TOKEN = "8224897386:AAGyv-f_GqAoyfQGy9Lu-sA3NCSSA8K2LmM"
 GOOGLE_SHEET_ID = "1HK27kQ5TvAH4p0Zt6OgNkiUlR6V0JsVxcljw2arV2nI"
 SHEET_NAME = "Registro"
@@ -39,6 +41,7 @@ class ColumnasSheet:
     CATEGORIA = 3
     MONTO = 4
     FORMAS_PAGO = 5
+    TIPO = 6  # Nuevo: gasto, ingreso, emergencia, inversion
 
 CATEGORIAS_LIST = [
     "Supermercado",
@@ -47,28 +50,54 @@ CATEGORIAS_LIST = [
     "Comidas fuera",
     "Entretenimiento",
     "Hogar",
-    "Transporte"
+    "Transporte",
+    "Inversion",
+    "Emergencia"
 ]
 
 FORMAS_PAGO_LIST = [
     "Efectivo",
     "Tarjeta debito",
-    "Tarjeta credito",
-    "Yappy",
-    "Otro"
+    "Tarjeta credito"
 ]
 
+# ==================== DATOS EN MEMORIA ====================
 datos_usuario = {}
 capital_usuario = {}
+emergencia_usuario = {}
+inversion_usuario = {}
 
+# ==================== CONEXION GOOGLE SHEETS ====================
 def conectar_google_sheets():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
     client = gspread.authorize(creds)
     sheet = client.open_by_key(GOOGLE_SHEET_ID)
-    worksheet = sheet.worksheet(SHEET_NAME)
+    try:
+        worksheet = sheet.worksheet(SHEET_NAME)
+    except:
+        worksheet = sheet.add_worksheet(title=SHEET_NAME, rows=100, cols=20)
+        worksheet.append_row(["Timestamp", "Fecha", "Comercio", "Categoria", "Monto", "Forma Pago", "Tipo"])
     return worksheet
 
+def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago, tipo="gasto"):
+    try:
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        fila = [''] * 7
+        fila[ColumnasSheet.FECHA] = fecha
+        fila[ColumnasSheet.COMERCIO] = comercio
+        fila[ColumnasSheet.CATEGORIA] = categoria
+        fila[ColumnasSheet.MONTO] = float(monto)
+        fila[ColumnasSheet.FORMAS_PAGO] = formas_pago
+        fila[ColumnasSheet.TIMESTAMP] = timestamp
+        fila[ColumnasSheet.TIPO] = tipo
+        worksheet.append_row(fila, value_input_option='USER_ENTERED')
+        return True
+    except Exception as e:
+        print(f"Error al guardar en Google Sheets: {e}")
+        return False
+
+# ==================== EXTRACCION DE DATOS DE FACTURA ====================
 def extraer_datos_factura(imagen_path):
     try:
         img = Image.open(imagen_path)
@@ -85,22 +114,7 @@ def extraer_datos_factura(imagen_path):
         print(f"Error al procesar imagen: {e}")
         return "Error", "Error", "Error"
 
-def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago):
-    try:
-        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        fila = [''] * 6
-        fila[ColumnasSheet.FECHA] = fecha
-        fila[ColumnasSheet.COMERCIO] = comercio
-        fila[ColumnasSheet.CATEGORIA] = categoria
-        fila[ColumnasSheet.FORMAS_PAGO] = formas_pago
-        fila[ColumnasSheet.MONTO] = float(monto)
-        fila[ColumnasSheet.TIMESTAMP] = timestamp
-        worksheet.append_row(fila, value_input_option='USER_ENTERED')
-        return True
-    except Exception as e:
-        print(f"Error al guardar en Google Sheets: {e}")
-        return False
-
+# ==================== TECLADOS ====================
 def crear_teclado_confirmacion():
     keyboard = [[InlineKeyboardButton("Si, guardar", callback_data="confirmar_si"), InlineKeyboardButton("No, editar", callback_data="confirmar_no")]]
     return InlineKeyboardMarkup(keyboard)
@@ -132,32 +146,127 @@ def crear_teclado_campos():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+# ==================== COMANDOS ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Bienvenido a tu bot financiero!\n\n"
+        "🏦 *Bienvenido a tu Asistente Financiero Personal!*\n\n"
         "Comandos disponibles:\n"
         "/start - Mostrar este mensaje\n"
         "/hola - Saludo\n"
-        "/capital - Guardar tu saldo inicial\n"
         "/gasto - Registrar un gasto manual\n"
+        "/capital_inicial - Registrar tu saldo inicial\n"
+        "/agregar_capital - Sumar dinero a tu saldo\n"
+        "/retirar_capital - Restar dinero de tu saldo\n"
         "/balance - Ver tu saldo actual\n"
         "/total - Ver total gastado\n"
+        "/emergencia_ver - Ver fondo de emergencia\n"
+        "/emergencia_agregar - Agregar al fondo de emergencia\n"
+        "/emergencia_retirar - Retirar del fondo de emergencia\n"
+        "/inversion_ver - Ver tus inversiones\n"
+        "/inversion_agregar - Agregar a inversiones\n"
+        "/inversion_retirar - Retirar de inversiones\n"
         "/ayuda - Mostrar todos los comandos\n\n"
-        "Tambien puedes enviar una foto de un ticket y lo procesare."
+        "📸 Tambien puedes enviar una foto de un ticket y lo procesare."
     )
 
 async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hola! Como estas? Envia una foto de tu factura o usa /gasto para registrar manualmente.")
+    await update.message.reply_text("¡Hola! ¿Cómo estás? Envía una foto de tu factura o usa /gasto para registrar manualmente.")
 
-async def capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------- CAPITAL ----------
+async def capital_inicial(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     try:
         monto = float(context.args[0].replace('$', '').replace(',', ''))
+        if user_id in capital_usuario:
+            await update.message.reply_text("⚠️ Ya tienes un capital registrado. Usa /agregar_capital para sumar o /retirar_capital para restar.")
+            return
         capital_usuario[user_id] = monto
-        await update.message.reply_text(f"Capital inicial guardado: ${monto:,.2f}")
+        await update.message.reply_text(f"✅ Capital inicial guardado: ${monto:,.2f}")
     except:
-        await update.message.reply_text("Uso correcto: /capital 25000")
+        await update.message.reply_text("📌 Uso correcto: /capital_inicial 25000")
 
+async def agregar_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        monto = float(context.args[0].replace('$', '').replace(',', ''))
+        if user_id not in capital_usuario:
+            await update.message.reply_text("❌ No has registrado capital inicial. Usa /capital_inicial 25000")
+            return
+        capital_usuario[user_id] += monto
+        await update.message.reply_text(f"✅ Capital agregado: +${monto:,.2f}\n💰 Nuevo saldo: ${capital_usuario[user_id]:,.2f}")
+    except:
+        await update.message.reply_text("📌 Uso correcto: /agregar_capital 1500")
+
+async def retirar_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        monto = float(context.args[0].replace('$', '').replace(',', ''))
+        if user_id not in capital_usuario:
+            await update.message.reply_text("❌ No has registrado capital inicial. Usa /capital_inicial 25000")
+            return
+        if monto > capital_usuario[user_id]:
+            await update.message.reply_text(f"❌ No tienes suficiente saldo. Saldo actual: ${capital_usuario[user_id]:,.2f}")
+            return
+        capital_usuario[user_id] -= monto
+        await update.message.reply_text(f"✅ Retiro registrado: -${monto:,.2f}\n💰 Nuevo saldo: ${capital_usuario[user_id]:,.2f}")
+    except:
+        await update.message.reply_text("📌 Uso correcto: /retirar_capital 500")
+
+# ---------- EMERGENCIA ----------
+async def emergencia_ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    saldo = emergencia_usuario.get(user_id, 0)
+    await update.message.reply_text(f"🆘 *Fondo de Emergencia:* ${saldo:,.2f}")
+
+async def emergencia_agregar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        monto = float(context.args[0].replace('$', '').replace(',', ''))
+        emergencia_usuario[user_id] = emergencia_usuario.get(user_id, 0) + monto
+        await update.message.reply_text(f"✅ Emergencia +${monto:,.2f}\n🆘 Total: ${emergencia_usuario[user_id]:,.2f}")
+    except:
+        await update.message.reply_text("📌 Uso correcto: /emergencia_agregar 1000")
+
+async def emergencia_retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        monto = float(context.args[0].replace('$', '').replace(',', ''))
+        if monto > emergencia_usuario.get(user_id, 0):
+            await update.message.reply_text(f"❌ No tienes suficiente en emergencia. Saldo: ${emergencia_usuario.get(user_id, 0):,.2f}")
+            return
+        emergencia_usuario[user_id] -= monto
+        await update.message.reply_text(f"✅ Retiro de emergencia: -${monto:,.2f}\n🆘 Total: ${emergencia_usuario[user_id]:,.2f}")
+    except:
+        await update.message.reply_text("📌 Uso correcto: /emergencia_retirar 500")
+
+# ---------- INVERSIONES ----------
+async def inversion_ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    saldo = inversion_usuario.get(user_id, 0)
+    await update.message.reply_text(f"📈 *Inversiones:* ${saldo:,.2f}")
+
+async def inversion_agregar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        monto = float(context.args[0].replace('$', '').replace(',', ''))
+        inversion_usuario[user_id] = inversion_usuario.get(user_id, 0) + monto
+        await update.message.reply_text(f"✅ Inversion +${monto:,.2f}\n📈 Total: ${inversion_usuario[user_id]:,.2f}")
+    except:
+        await update.message.reply_text("📌 Uso correcto: /inversion_agregar 1000")
+
+async def inversion_retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        monto = float(context.args[0].replace('$', '').replace(',', ''))
+        if monto > inversion_usuario.get(user_id, 0):
+            await update.message.reply_text(f"❌ No tienes suficiente en inversiones. Saldo: ${inversion_usuario.get(user_id, 0):,.2f}")
+            return
+        inversion_usuario[user_id] -= monto
+        await update.message.reply_text(f"✅ Retiro de inversion: -${monto:,.2f}\n📈 Total: ${inversion_usuario[user_id]:,.2f}")
+    except:
+        await update.message.reply_text("📌 Uso correcto: /inversion_retirar 500")
+
+# ---------- GASTO MANUAL ----------
 async def gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     try:
@@ -178,46 +287,54 @@ async def gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mensaje = f"Gasto detectado: ${monto:,.2f} en {concepto}\nSelecciona la categoria:"
         await update.message.reply_text(mensaje, reply_markup=crear_teclado_categorias())
     except:
-        await update.message.reply_text("Uso correcto: /gasto 350 Comida")
+        await update.message.reply_text("📌 Uso correcto: /gasto 350 Comida")
 
+# ---------- BALANCE ----------
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in capital_usuario:
-        await update.message.reply_text("No has registrado tu capital. Usa /capital 25000")
-        return
+    capital = capital_usuario.get(user_id, 0)
+    emergencia = emergencia_usuario.get(user_id, 0)
+    inversion = inversion_usuario.get(user_id, 0)
     try:
         worksheet = conectar_google_sheets()
         registros = worksheet.get_all_records()
-        total_gastos = sum(float(r['Monto']) for r in registros)
-        saldo = capital_usuario[user_id] - total_gastos
+        total_gastos = sum(float(r['Monto']) for r in registros if r.get('Tipo', 'gasto') == 'gasto')
+        saldo = capital - total_gastos
         await update.message.reply_text(
-            f"Resumen financiero:\n"
-            f"Capital inicial: ${capital_usuario[user_id]:,.2f}\n"
-            f"Total gastado: ${total_gastos:,.2f}\n"
-            f"Saldo actual: ${saldo:,.2f}"
+            f"📊 *Resumen Financiero*\n\n"
+            f"💰 Capital: ${capital:,.2f}\n"
+            f"💸 Gastos: ${total_gastos:,.2f}\n"
+            f"🟢 Saldo: ${saldo:,.2f}\n\n"
+            f"🆘 Emergencia: ${emergencia:,.2f}\n"
+            f"📈 Inversiones: ${inversion:,.2f}"
         )
     except Exception as e:
         await update.message.reply_text(f"Error al calcular: {str(e)}")
 
+# ---------- TOTAL GASTADO ----------
 async def total(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         worksheet = conectar_google_sheets()
         registros = worksheet.get_all_records()
-        total_gastos = sum(float(r['Monto']) for r in registros)
+        total_gastos = sum(float(r['Monto']) for r in registros if r.get('Tipo', 'gasto') == 'gasto')
         categorias = {}
         for r in registros:
+            if r.get('Tipo', 'gasto') != 'gasto':
+                continue
             cat = r.get('Categoria', 'Sin categoria')
             categorias[cat] = categorias.get(cat, 0) + float(r['Monto'])
-        msg = f"Total gastado: ${total_gastos:,.2f}\n\nPor categoria:\n"
+        msg = f"💸 *Total gastado:* ${total_gastos:,.2f}\n\n📂 *Por categoria:*\n"
         for cat, monto in categorias.items():
             msg += f"{cat}: ${monto:,.2f}\n"
         await update.message.reply_text(msg)
     except Exception as e:
         await update.message.reply_text(f"Error: {str(e)}")
 
+# ---------- AYUDA ----------
 async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
+# ==================== MANEJADOR DE FOTOS ====================
 async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = update.effective_user.id
@@ -227,7 +344,7 @@ async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         os.makedirs(tmp_dir, exist_ok=True)
         imagen_path = os.path.join(tmp_dir, f"factura_{foto.file_id}.jpg")
         await archivo.download_to_drive(imagen_path)
-        mensaje_procesando = await update.message.reply_text("Procesando factura...")
+        mensaje_procesando = await update.message.reply_text("⏳ Procesando factura...")
         fecha, comercio, monto = extraer_datos_factura(imagen_path)
         datos_usuario[user_id] = {
             'fecha': fecha,
@@ -239,15 +356,16 @@ async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         if fecha == "No detectada":
             datos_usuario[user_id]['editando'] = 'fecha'
-            await mensaje_procesando.edit_text("No se pudo detectar la fecha. Escribe la fecha (DD/MM/YYYY):")
+            await mensaje_procesando.edit_text("📅 No se pudo detectar la fecha. Escribe la fecha (DD/MM/YYYY):")
             return
         print(f"Datos extraidos - Fecha: {fecha}, Comercio: {comercio}, Monto: {monto}")
-        mensaje = f"Datos extraidos de la factura:\nFecha: {fecha}\nComercio: {comercio}\nMonto: ${monto}\n\nSon correctos?"
+        mensaje = f"📋 Datos extraidos de la factura:\n📅 Fecha: {fecha}\n🏪 Comercio: {comercio}\n💰 Monto: ${monto}\n\n¿Son correctos?"
         await mensaje_procesando.edit_text(mensaje, reply_markup=crear_teclado_continuar())
     except Exception as e:
-        await update.message.reply_text(f"Error al procesar la factura: {str(e)}")
+        await update.message.reply_text(f"❌ Error al procesar la factura: {str(e)}")
         print(f"Error completo: {e}")
 
+# ==================== MANEJADOR DE BOTONES ====================
 async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -259,19 +377,19 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data.startswith("cat_"):
         categoria_seleccionada = query.data[4:]
         datos_usuario[user_id]['categoria'] = categoria_seleccionada
-        await query.edit_message_text(f"Categoria: {categoria_seleccionada}\nSelecciona la forma de pago:", reply_markup=crear_teclado_formas_pago())
+        await query.edit_message_text(f"🏷️ Categoria: {categoria_seleccionada}\nSelecciona la forma de pago:", reply_markup=crear_teclado_formas_pago())
         return
     if query.data.startswith("fp_"):
         forma_pago_seleccionada = query.data[3:]
         datos_usuario[user_id]['formas_pago'] = forma_pago_seleccionada
-        mensaje = f"""Datos finales:
-Fecha: {datos['fecha']}
-Comercio: {datos['comercio']}
-Monto: ${datos['monto']}
-Categoria: {datos['categoria']}
-Forma de pago: {forma_pago_seleccionada}
+        mensaje = f"""📋 Datos finales:
+📅 Fecha: {datos['fecha']}
+🏪 Comercio: {datos['comercio']}
+💰 Monto: ${datos['monto']}
+🏷️ Categoria: {datos['categoria']}
+💳 Forma de pago: {forma_pago_seleccionada}
 
-Son correctos?"""
+¿Son correctos?"""
         await query.edit_message_text(mensaje, reply_markup=crear_teclado_confirmacion())
         return
     if query.data == "continuar":
@@ -284,26 +402,28 @@ Son correctos?"""
     if query.data == "confirmar_si":
         try:
             worksheet = conectar_google_sheets()
-            if guardar_en_sheets(worksheet, datos['fecha'], datos['comercio'], datos['monto'], datos['categoria'], datos['formas_pago']):
-                await query.edit_message_text(f"Factura guardada exitosamente!\n\nFecha: {datos['fecha']}\nComercio: {datos['comercio']}\nMonto: ${datos['monto']}\nCategoria: {datos['categoria']}\nForma de pago: {datos['formas_pago']}")
+            if guardar_en_sheets(worksheet, datos['fecha'], datos['comercio'], datos['monto'], datos['categoria'], datos['formas_pago'], "gasto"):
+                await query.edit_message_text(f"✅ Factura guardada exitosamente!\n\n📅 Fecha: {datos['fecha']}\n🏪 Comercio: {datos['comercio']}\n💰 Monto: ${datos['monto']}\n🏷️ Categoria: {datos['categoria']}\n💳 Forma de pago: {datos['formas_pago']}")
+                if 'capital_usuario' in globals() and user_id in capital_usuario:
+                    capital_usuario[user_id] -= float(datos['monto'])
             else:
-                await query.edit_message_text("Error al guardar en Google Sheets.")
+                await query.edit_message_text("❌ Error al guardar en Google Sheets.")
             if datos['imagen_path'] and os.path.exists(datos['imagen_path']):
                 os.remove(datos['imagen_path'])
             del datos_usuario[user_id]
         except Exception as e:
-            await query.edit_message_text(f"Error: {str(e)}")
+            await query.edit_message_text(f"❌ Error: {str(e)}")
     elif query.data == "confirmar_no":
-        await query.edit_message_text("Que dato deseas cambiar?", reply_markup=crear_teclado_campos())
+        await query.edit_message_text("¿Qué dato deseas cambiar?", reply_markup=crear_teclado_campos())
     elif query.data == "editar_fecha":
         datos_usuario[user_id]['editando'] = 'fecha'
-        await query.edit_message_text(f"Fecha actual: {datos['fecha']}\nEscribe la nueva fecha (DD/MM/YYYY):")
+        await query.edit_message_text(f"📅 Fecha actual: {datos['fecha']}\nEscribe la nueva fecha (DD/MM/YYYY):")
     elif query.data == "editar_comercio":
         datos_usuario[user_id]['editando'] = 'comercio'
-        await query.edit_message_text(f"Comercio actual: {datos['comercio']}\nEscribe el nuevo comercio:")
+        await query.edit_message_text(f"🏪 Comercio actual: {datos['comercio']}\nEscribe el nuevo comercio:")
     elif query.data == "editar_monto":
         datos_usuario[user_id]['editando'] = 'monto'
-        await query.edit_message_text(f"Monto actual: ${datos['monto']}\nEscribe el nuevo monto (ej: 45.50):")
+        await query.edit_message_text(f"💰 Monto actual: ${datos['monto']}\nEscribe el nuevo monto (ej: 45.50):")
     elif query.data == "editar_categoria":
         await query.edit_message_text("Selecciona la nueva categoria:", reply_markup=crear_teclado_categorias())
     elif query.data == "editar_forma_pago":
@@ -312,7 +432,7 @@ Son correctos?"""
         if datos['imagen_path'] and os.path.exists(datos['imagen_path']):
             os.remove(datos['imagen_path'])
         del datos_usuario[user_id]
-        await query.edit_message_text("Operacion cancelada.")
+        await query.edit_message_text("❌ Operación cancelada.")
 
 async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -339,40 +459,58 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif datos['formas_pago'] is None:
         await update.message.reply_text("Selecciona la forma de pago:", reply_markup=crear_teclado_formas_pago())
         return
-    mensaje = f"""Datos actualizados:
-Fecha: {datos['fecha']}
-Comercio: {datos['comercio']}
-Monto: ${datos['monto']}
-Categoria: {datos['categoria']}
-Forma de pago: {datos['formas_pago']}
+    mensaje = f"""📋 Datos actualizados:
+📅 Fecha: {datos['fecha']}
+🏪 Comercio: {datos['comercio']}
+💰 Monto: ${datos['monto']}
+🏷️ Categoria: {datos['categoria']}
+💳 Forma de pago: {datos['formas_pago']}
 
-Son correctos?"""
+¿Son correctos?"""
     await update.message.reply_text(mensaje, reply_markup=crear_teclado_confirmacion())
 
+# ==================== MAIN ====================
 def main():
-    print("Iniciando bot de facturas...")
+    print("🤖 Iniciando bot de facturas...")
     if not TELEGRAM_TOKEN:
-        print("ERROR: Debes configurar tu TELEGRAM_TOKEN")
+        print("❌ ERROR: Debes configurar tu TELEGRAM_TOKEN")
         return
     if not GOOGLE_SHEET_ID:
-        print("ERROR: Debes configurar tu GOOGLE_SHEET_ID")
+        print("❌ ERROR: Debes configurar tu GOOGLE_SHEET_ID")
         return
     if not os.path.exists(CREDENTIALS_FILE):
-        print("ERROR: No se encuentra el archivo credenciales.json")
+        print("❌ ERROR: No se encuentra el archivo credenciales.json")
         return
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # Comandos
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("hola", hola))
-    app.add_handler(CommandHandler("capital", capital))
     app.add_handler(CommandHandler("gasto", gasto))
+    app.add_handler(CommandHandler("capital_inicial", capital_inicial))
+    app.add_handler(CommandHandler("agregar_capital", agregar_capital))
+    app.add_handler(CommandHandler("retirar_capital", retirar_capital))
     app.add_handler(CommandHandler("balance", balance))
     app.add_handler(CommandHandler("total", total))
     app.add_handler(CommandHandler("ayuda", ayuda))
+    
+    # Emergencia
+    app.add_handler(CommandHandler("emergencia_ver", emergencia_ver))
+    app.add_handler(CommandHandler("emergencia_agregar", emergencia_agregar))
+    app.add_handler(CommandHandler("emergencia_retirar", emergencia_retirar))
+    
+    # Inversiones
+    app.add_handler(CommandHandler("inversion_ver", inversion_ver))
+    app.add_handler(CommandHandler("inversion_agregar", inversion_agregar))
+    app.add_handler(CommandHandler("inversion_retirar", inversion_retirar))
+    
+    # Manejadores
     app.add_handler(MessageHandler(filters.PHOTO, manejar_foto))
     app.add_handler(CallbackQueryHandler(manejar_botones))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
-    print("Bot iniciado correctamente")
-    print("Esperando fotos de facturas...")
+    
+    print("✅ Bot iniciado correctamente")
+    print("📸 Esperando fotos de facturas...")
     print("Presiona Ctrl+C para detener el bot\n")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
