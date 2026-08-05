@@ -284,7 +284,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "'Agregué 1500 a mi capital'\n"
         "'Retiré 500 de débito'\n"
         "'Gasté 350 en comida'\n"
-        "'Cuánto tengo'"
+        "'Cuánto tengo'\n"
+        "'Crédito disponible 1831'"
     )
 
 async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -611,12 +612,12 @@ def extraer_monto(texto):
     texto_limpio = re.sub(r'\bcentavos?\b', '', texto, flags=re.IGNORECASE)
     
     patrones = [
-        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)',  # 22,853.86
-        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:,\d{1,2})?)',  # 22,853,86
-        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:,\d{1,2})?)',  # 22.853,86
-        r'\$?\s*(\d{1,}(?:\.\d{1,2})?)',             # 22853.86
-        r'\$?\s*(\d{1,}(?:,\d{1,2})?)',             # 22853,86
-        r'(\d+)\s*(?:pesos|peso)',                  # 350 pesos
+        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)',
+        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:,\d{1,2})?)',
+        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:,\d{1,2})?)',
+        r'\$?\s*(\d{1,}(?:\.\d{1,2})?)',
+        r'\$?\s*(\d{1,}(?:,\d{1,2})?)',
+        r'(\d+)\s*(?:pesos|peso)',
     ]
     
     for patron in patrones:
@@ -661,16 +662,32 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
     
     monto = extraer_monto(texto)
     
-    # PALABRAS CLAVE
-    palabras_capital = ['tengo', 'ten', 'teng', 'tenho', 'capital', 'capial', 'ahorro', 'ahoro', 'cuenta', 'cueta', 'saldo', 'fondo', 'total', 'banco', 'mi dinero', 'guardar', 'guarda', 'guard']
-    palabras_gasto = ['gaste', 'gasté', 'gast', 'pag', 'pague', 'pagué', 'compre', 'compré', 'compr', 'use', 'usé', 'gasto', 'pago', 'costo', 'costó', 'costaron', 'comida', 'super', 'mercado', 'cheetos']
-    palabras_ingreso = ['agrege', 'agregé', 'agreg', 'ingrese', 'ingresé', 'ingres', 'sume', 'sumé', 'aumente', 'aumenté', 'recibe', 'recibí', 'deposite', 'deposité', 'sueldo', 'salario', 'bono', 'pago', 'me pagaron', 'recibí']
-    palabras_retiro = ['retire', 'retiré', 'retir', 'saque', 'saqué', 'quite', 'quité', 'sacar', 'retiro']
-    palabras_balance = ['cuanto tengo', 'cuánto tengo', 'balance', 'cuanto dinero', 'cuánto dinero', 'resumen', 'saldo actual', 'estatus', 'mis finanzas']
-    palabras_emergencia = ['emergencia', 'emerncia', 'fondo', 'ahorro', 'reserva']
-    palabras_inversion = ['inversion', 'inversión', 'invierto', 'inverti', 'invertí', 'accion', 'bolsa', 'cripto', 'bitcoin']
-    palabras_deuda = ['deuda', 'debo', 'adeudo', 'credito', 'crédito', 'tarjeta', 'prestamo']
+    # ========== PALABRAS CLAVE ==========
+    # CAPITAL: incluye "crédito disponible", "tengo", "capital", etc.
+    palabras_capital = ['tengo', 'ten', 'teng', 'tenho', 'capital', 'capial', 'ahorro', 'ahoro', 'cuenta', 'cueta', 'saldo', 'fondo', 'total', 'banco', 'mi dinero', 'guardar', 'guarda', 'guard', 'credito disponible', 'crédito disponible']
     
+    # GASTO
+    palabras_gasto = ['gaste', 'gasté', 'gast', 'pag', 'pague', 'pagué', 'compre', 'compré', 'compr', 'use', 'usé', 'gasto', 'pago', 'costo', 'costó', 'costaron', 'comida', 'super', 'mercado', 'cheetos']
+    
+    # INGRESO
+    palabras_ingreso = ['agrege', 'agregé', 'agreg', 'ingrese', 'ingresé', 'ingres', 'sume', 'sumé', 'aumente', 'aumenté', 'recibe', 'recibí', 'deposite', 'deposité', 'sueldo', 'salario', 'bono', 'pago', 'me pagaron', 'recibí']
+    
+    # RETIRO
+    palabras_retiro = ['retire', 'retiré', 'retir', 'saque', 'saqué', 'quite', 'quité', 'sacar', 'retiro']
+    
+    # BALANCE
+    palabras_balance = ['cuanto tengo', 'cuánto tengo', 'balance', 'cuanto dinero', 'cuánto dinero', 'resumen', 'saldo actual', 'estatus', 'mis finanzas']
+    
+    # EMERGENCIA
+    palabras_emergencia = ['emergencia', 'emerncia', 'fondo', 'ahorro', 'reserva']
+    
+    # INVERSION
+    palabras_inversion = ['inversion', 'inversión', 'invierto', 'inverti', 'invertí', 'accion', 'bolsa', 'cripto', 'bitcoin']
+    
+    # DEUDA (solo si no es "crédito disponible")
+    palabras_deuda = ['deuda', 'debo', 'adeudo', 'prestamo']
+    
+    # MEDIO DE PAGO
     palabras_efectivo = ['efectivo', 'efetivo', 'efettivo', 'efectibo', 'cash', 'billete', 'moneda', 'fisico', 'físico']
     palabras_debito = ['debito', 'débito', 'tarjeta debito', 'tarjeta débito', 'td', 'visa debito']
     palabras_credito = ['credito', 'crédito', 'tarjeta credito', 'tarjeta crédito', 'tc', 'visa credito']
@@ -683,6 +700,12 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
     # ========== DETECTAR CAPITAL INICIAL ==========
     es_capital = contiene_palabra(texto, palabras_capital)
     es_gasto = contiene_palabra(texto, palabras_gasto)
+    es_deuda = contiene_palabra(texto, palabras_deuda)
+    
+    # Si es "crédito disponible", es CAPITAL, no deuda
+    if "credito disponible" in texto or "crédito disponible" in texto:
+        es_deuda = False
+        es_capital = True
     
     if es_capital and monto and not es_gasto:
         context.user_data['capital_monto'] = monto
@@ -760,7 +783,7 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         return
     
     # ========== DEUDA ==========
-    if contiene_palabra(texto, palabras_deuda) and monto:
+    if es_deuda and monto:
         nombre = extraer_concepto(texto, monto) or "Deuda"
         worksheet = conectar_google_sheets(FINANZAS_SHEET)
         if guardar_movimiento_finanzas(worksheet, f"Deuda: {nombre}", "deuda", monto, "", "Nueva deuda"):
@@ -780,7 +803,8 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         "• 'Cuánto tengo' → Balance\n"
         "• 'Emergencia 2000' → Emergencia\n"
         "• 'Inversión 1500' → Inversión\n"
-        "• 'Deuda 5000 tarjeta' → Deuda\n\n"
+        "• 'Deuda 5000 tarjeta' → Deuda\n"
+        "• 'Crédito disponible 1831' → Capital\n\n"
         "🗣️ No importa cómo lo digas o cómo lo escribas, el bot te entiende."
     )
 
