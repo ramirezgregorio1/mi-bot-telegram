@@ -20,11 +20,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ===== LEE CREDENCIALES DESDE VARIABLE DE RAILWAY =====
 cred_json = os.getenv("CREDENTIALS_JSON")
 if cred_json:
-    creds_dict = json.loads(cred_json)
-    with open("credenciales.json", "w") as f:
-        json.dump(creds_dict, f)
-    CREDENTIALS_FILE = "credenciales.json"
-    print("✅ Credenciales cargadas desde variable CREDENTIALS_JSON")
+    try:
+        creds_dict = json.loads(cred_json)
+        with open("credenciales.json", "w") as f:
+            json.dump(creds_dict, f)
+        CREDENTIALS_FILE = "credenciales.json"
+        print("✅ Credenciales cargadas desde variable CREDENTIALS_JSON")
+    except Exception as e:
+        print(f"❌ Error al cargar CREDENTIALS_JSON: {e}")
+        CREDENTIALS_FILE = os.path.join(BASE_DIR, "credenciales.json")
 else:
     CREDENTIALS_FILE = os.path.join(BASE_DIR, "credenciales.json")
     print("⚠️ Usando archivo credenciales.json local")
@@ -113,19 +117,23 @@ def contiene_palabra(texto, lista_palabras, umbral=1):
 
 # ==================== CONEXION GOOGLE SHEETS ====================
 def conectar_google_sheets(nombre_hoja=SHEET_NAME):
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(GOOGLE_SHEET_ID)
     try:
-        worksheet = sheet.worksheet(nombre_hoja)
-    except:
-        worksheet = sheet.add_worksheet(title=nombre_hoja, rows=100, cols=20)
-        if nombre_hoja == SHEET_NAME:
-            worksheet.append_row(["Timestamp", "Fecha", "Comercio", "Categoria", "Monto", "Forma Pago", "Tipo"])
-        elif nombre_hoja == FINANZAS_SHEET:
-            worksheet.append_row(["Fecha", "Concepto", "Categoria", "Monto", "Medio", "Nota"])
-    return worksheet
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(GOOGLE_SHEET_ID)
+        try:
+            worksheet = sheet.worksheet(nombre_hoja)
+        except:
+            worksheet = sheet.add_worksheet(title=nombre_hoja, rows=100, cols=20)
+            if nombre_hoja == SHEET_NAME:
+                worksheet.append_row(["Timestamp", "Fecha", "Comercio", "Categoria", "Monto", "Forma Pago", "Tipo"])
+            elif nombre_hoja == FINANZAS_SHEET:
+                worksheet.append_row(["Fecha", "Concepto", "Categoria", "Monto", "Medio", "Nota"])
+        return worksheet
+    except Exception as e:
+        print(f"❌ Error al conectar con Google Sheets: {e}")
+        raise e
 
 def guardar_en_sheets(worksheet, fecha, comercio, monto, categoria, formas_pago, tipo="gasto"):
     try:
