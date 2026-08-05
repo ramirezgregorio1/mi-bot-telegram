@@ -67,7 +67,6 @@ datos_usuario = {}
 
 # ==================== COINCIDENCIA APROXIMADA ====================
 def levenshtein(a, b):
-    """Calcula la distancia de Levenshtein entre dos palabras"""
     if len(a) < len(b):
         a, b = b, a
     if len(b) == 0:
@@ -85,7 +84,6 @@ def levenshtein(a, b):
     return row1[-1]
 
 def similar(palabra1, palabra2, umbral=1):
-    """Verifica si dos palabras son similares permitiendo errores de escritura"""
     if len(palabra1) < 3 or len(palabra2) < 3:
         return palabra1 == palabra2
     if abs(len(palabra1) - len(palabra2)) > umbral:
@@ -98,7 +96,6 @@ def similar(palabra1, palabra2, umbral=1):
     return levenshtein(palabra1, palabra2) <= umbral
 
 def contiene_palabra(texto, lista_palabras, umbral=1):
-    """Verifica si el texto contiene alguna palabra de la lista, permitiendo errores"""
     texto_limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ ]', '', texto.lower())
     palabras_texto = texto_limpio.split()
     for palabra_buscar in lista_palabras:
@@ -251,7 +248,7 @@ def crear_teclado_campos():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🏦 *Bienvenido a tu Asistente Financiero Personal!*\n\n"
-        "Comandos disponibles:\n"
+        "📌 *Comandos disponibles:*\n"
         "/start - Mostrar este mensaje\n"
         "/hola - Saludo\n"
         "/gasto - Registrar un gasto manual\n"
@@ -274,13 +271,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/deuda_ver - Ver resumen de deudas\n"
         "/ayuda - Mostrar todos los comandos\n\n"
         "📸 Tambien puedes enviar una foto de un ticket y lo procesare.\n\n"
-        "🗣️ *También puedes hablarme naturalmente:*\n"
+        "🗣️ *O puedes hablarme naturalmente:*\n"
         "'Tengo 23000 en mi capital'\n"
         "'Agregué 1500 a mi capital'\n"
         "'Retiré 500 de débito'\n"
         "'Gasté 350 en comida'\n"
-        "'Cuánto tengo'\n\n"
-        "🎤 *O enviarme un audio* y lo transcribiré."
+        "'Cuánto tengo'"
     )
 
 async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -603,16 +599,18 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== FUNCIONES DE LENGUAJE NATURAL ====================
 def extraer_monto(texto):
-    """Extrae el monto de cualquier texto, con soporte para comas y decimales"""
+    """Extrae el monto correctamente, sin confundir comas y puntos"""
     texto_limpio = re.sub(r'\bcentavos?\b', '', texto, flags=re.IGNORECASE)
+    
     patrones = [
-        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)',
-        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:,\d{1,2})?)',
-        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:,\d{1,2})?)',
-        r'\$?\s*(\d{1,}(?:\.\d{1,2})?)',
-        r'\$?\s*(\d{1,}(?:,\d{1,2})?)',
-        r'(\d+)\s*(?:pesos|peso)',
+        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)',  # 22,853.86
+        r'\$?\s*(\d{1,3}(?:,\d{3})+(?:,\d{1,2})?)',  # 22,853,86
+        r'\$?\s*(\d{1,}(?:\.\d{3})+(?:,\d{1,2})?)',  # 22.853,86
+        r'\$?\s*(\d{1,}(?:\.\d{1,2})?)',             # 22853.86
+        r'\$?\s*(\d{1,}(?:,\d{1,2})?)',             # 22853,86
+        r'(\d+)\s*(?:pesos|peso)',                  # 350 pesos
     ]
+    
     for patron in patrones:
         match = re.search(patron, texto_limpio)
         if match:
@@ -622,7 +620,11 @@ def extraer_monto(texto):
             elif '.' in monto_str and ',' in monto_str:
                 monto_str = monto_str.replace('.', '').replace(',', '.')
             elif ',' in monto_str and '.' not in monto_str:
-                monto_str = monto_str.replace(',', '.')
+                partes = monto_str.split(',')
+                if len(partes) == 2 and len(partes[1]) == 2:
+                    monto_str = monto_str.replace(',', '.')
+                elif len(partes[-1]) == 3:
+                    monto_str = monto_str.replace(',', '')
             try:
                 return float(monto_str)
             except:
@@ -640,7 +642,7 @@ def extraer_concepto(texto, monto):
 
 # ==================== PROCESADOR DE LENGUAJE NATURAL ====================
 async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Procesa mensajes de texto con coincidencia aproximada y análisis de contexto"""
+    """Procesa mensajes de texto en lenguaje natural"""
     texto_original = update.message.text
     texto = texto_original.lower().strip()
     user_id = update.effective_user.id
@@ -649,26 +651,23 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         await start(update, context)
         return
     
-    # Extraer monto
     monto = extraer_monto(texto)
     
-    # ========== DETECTAR INTENCIÓN ==========
-    # Palabras clave para cada categoría (con errores comunes)
-    palabras_capital = ['tengo', 'ten', 'teng', 'tenho', 'capital', 'capial', 'ahorro', 'ahoro', 'cuenta', 'cueta', 'saldo', 'fondo', 'total', 'banco', 'mi dinero']
+    # PALABRAS CLAVE
+    palabras_capital = ['tengo', 'ten', 'teng', 'tenho', 'capital', 'capial', 'ahorro', 'ahoro', 'cuenta', 'cueta', 'saldo', 'fondo', 'total', 'banco', 'mi dinero', 'guardar', 'guarda', 'guard']
     palabras_gasto = ['gaste', 'gasté', 'gast', 'pag', 'pague', 'pagué', 'compre', 'compré', 'compr', 'use', 'usé', 'gasto', 'pago', 'costo', 'costó', 'costaron', 'comida', 'super', 'mercado', 'cheetos']
-    palabras_ingreso = ['agrege', 'agregé', 'agreg', 'ingrese', 'ingresé', 'ingres', 'sume', 'sumé', 'aumente', 'aumenté', 'recibe', 'recibí', 'deposite', 'deposité', 'sueldo', 'salario', 'bono', 'pago', 'me pagaron']
+    palabras_ingreso = ['agrege', 'agregé', 'agreg', 'ingrese', 'ingresé', 'ingres', 'sume', 'sumé', 'aumente', 'aumenté', 'recibe', 'recibí', 'deposite', 'deposité', 'sueldo', 'salario', 'bono', 'pago', 'me pagaron', 'recibí']
     palabras_retiro = ['retire', 'retiré', 'retir', 'saque', 'saqué', 'quite', 'quité', 'sacar', 'retiro']
     palabras_balance = ['cuanto tengo', 'cuánto tengo', 'balance', 'cuanto dinero', 'cuánto dinero', 'resumen', 'saldo actual', 'estatus', 'mis finanzas']
     palabras_emergencia = ['emergencia', 'emerncia', 'fondo', 'ahorro', 'reserva']
     palabras_inversion = ['inversion', 'inversión', 'invierto', 'inverti', 'invertí', 'accion', 'bolsa', 'cripto', 'bitcoin']
     palabras_deuda = ['deuda', 'debo', 'adeudo', 'credito', 'crédito', 'tarjeta', 'prestamo']
     
-    # Palabras clave para detectar el medio
     palabras_efectivo = ['efectivo', 'efetivo', 'efettivo', 'efectibo', 'cash', 'billete', 'moneda', 'fisico', 'físico']
     palabras_debito = ['debito', 'débito', 'tarjeta debito', 'tarjeta débito', 'td', 'visa debito']
     palabras_credito = ['credito', 'crédito', 'tarjeta credito', 'tarjeta crédito', 'tc', 'visa credito']
     
-    # ========== DETECTAR SI ES BALANCE (prioridad máxima) ==========
+    # ========== DETECTAR SI ES BALANCE ==========
     if contiene_palabra(texto, palabras_balance) or re.search(r'cu[aá]nto\s*tengo', texto):
         await balance(update, context)
         return
@@ -762,7 +761,7 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("❌ Error al guardar.")
         return
     
-    # ========== SI NO SE RECONOCE NADA ==========
+    # ========== SI NO SE RECONOCE ==========
     await update.message.reply_text(
         "❌ No entendí tu mensaje.\n\n"
         "📌 *Ejemplos:*\n"
@@ -776,28 +775,6 @@ async def procesar_texto_natural(update: Update, context: ContextTypes.DEFAULT_T
         "• 'Deuda 5000 tarjeta' → Deuda\n\n"
         "🗣️ No importa cómo lo digas o cómo lo escribas, el bot te entiende."
     )
-
-# ==================== MANEJADOR DE AUDIOS ====================
-async def manejar_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        audio = update.message.voice
-        if not audio:
-            return
-        mensaje_procesando = await update.message.reply_text("🎤 Escuchando tu audio...")
-        texto_transcrito = update.message.caption or ""
-        if not texto_transcrito:
-            archivo = await audio.get_file()
-            file_path = os.path.join(BASE_DIR, f"audio_{update.effective_user.id}.ogg")
-            await archivo.download_to_drive(file_path)
-            await mensaje_procesando.edit_text("❌ No se pudo transcribir el audio automáticamente. Por favor, escribe tu mensaje o envía un audio más claro.")
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            return
-        await mensaje_procesando.edit_text(f"📝 Transcrito: '{texto_transcrito}'")
-        update.message.text = texto_transcrito
-        await procesar_texto_natural(update, context)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error al procesar el audio: {str(e)}")
 
 # ==================== MANEJADOR DE FOTOS ====================
 async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -984,14 +961,12 @@ def main():
     
     # Manejadores
     app.add_handler(MessageHandler(filters.PHOTO, manejar_foto))
-    app.add_handler(MessageHandler(filters.VOICE, manejar_audio))
     app.add_handler(CallbackQueryHandler(manejar_botones))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_texto_natural))
     
     print("✅ Bot iniciado correctamente")
     print("📸 Esperando fotos de facturas...")
-    print("🗣️ Reconocimiento de lenguaje natural ULTRA-TOLERANTE activado (detecta errores de escritura)")
-    print("🎤 Mensajes de voz activados")
+    print("🗣️ Lenguaje natural activado")
     print("Presiona Ctrl+C para detener el bot\n")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
